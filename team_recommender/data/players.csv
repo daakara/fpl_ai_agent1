@@ -1,0 +1,11 @@
+id,web_name,element_type,now_cost,expected_points_next_5,selected_by_percent,fixture_difficulty,form,injury_status
+1,Player A,1,50,5,10,2,3.0,Fit
+2,Player B,2,60,6,20,3,3.5,Injured
+3,Player C,3,70,7,30,4,4.0,Fit
+4,Player D,4,80,8,40,5,4.5,Fit
+5,Player E,1,50,5,10,2,3.0,Doubtful
+6,Player F,2,60,6,20,3,3.5,Fit
+7,Player G,3,70,7,30,4,4.0,Fit
+8,Player H,4,80,8,40,5,4.5,Injured
+9,Player I,2,60,6,20,3,3.5,Fit
+10,Player J,3,70,7,30,4,4.0,Fit

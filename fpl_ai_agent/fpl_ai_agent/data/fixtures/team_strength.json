@@ -1,0 +1,80 @@
+{
+    "team_strength": {
+        "Arsenal": {
+            "attack": 4.5,
+            "defense": 3.5
+        },
+        "Aston Villa": {
+            "attack": 3.5,
+            "defense": 4.0
+        },
+        "Bournemouth": {
+            "attack": 2.5,
+            "defense": 2.0
+        },
+        "Brentford": {
+            "attack": 3.0,
+            "defense": 3.0
+        },
+        "Brighton": {
+            "attack": 4.0,
+            "defense": 3.5
+        },
+        "Chelsea": {
+            "attack": 4.0,
+            "defense": 4.5
+        },
+        "Crystal Palace": {
+            "attack": 3.0,
+            "defense": 3.5
+        },
+        "Everton": {
+            "attack": 2.5,
+            "defense": 3.0
+        },
+        "Fulham": {
+            "attack": 3.0,
+            "defense": 2.5
+        },
+        "Liverpool": {
+            "attack": 5.0,
+            "defense": 4.0
+        },
+        "Luton Town": {
+            "attack": 2.0,
+            "defense": 2.0
+        },
+        "Manchester City": {
+            "attack": 5.0,
+            "defense": 5.0
+        },
+        "Manchester United": {
+            "attack": 4.0,
+            "defense": 3.5
+        },
+        "Newcastle": {
+            "attack": 4.5,
+            "defense": 4.0
+        },
+        "Nottingham Forest": {
+            "attack": 2.5,
+            "defense": 2.5
+        },
+        "Sheffield United": {
+            "attack": 2.0,
+            "defense": 2.0
+        },
+        "Tottenham": {
+            "attack": 4.5,
+            "defense": 3.0
+        },
+        "West Ham": {
+            "attack": 3.5,
+            "defense": 3.5
+        },
+        "Wolverhampton": {
+            "attack": 3.0,
+            "defense": 3.0
+        }
+    }
+}

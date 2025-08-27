@@ -1,0 +1,39 @@
+{
+  "fixtures": [
+    {
+      "home_team": "Team A",
+      "away_team": "Team B",
+      "date": "2023-10-15",
+      "time": "15:00",
+      "competition": "Premier League"
+    },
+    {
+      "home_team": "Team C",
+      "away_team": "Team D",
+      "date": "2023-10-16",
+      "time": "17:30",
+      "competition": "Premier League"
+    },
+    {
+      "home_team": "Team E",
+      "away_team": "Team F",
+      "date": "2023-10-22",
+      "time": "15:00",
+      "competition": "Premier League"
+    },
+    {
+      "home_team": "Team G",
+      "away_team": "Team H",
+      "date": "2023-10-23",
+      "time": "20:00",
+      "competition": "Premier League"
+    },
+    {
+      "home_team": "Team I",
+      "away_team": "Team J",
+      "date": "2023-10-29",
+      "time": "15:00",
+      "competition": "Premier League"
+    }
+  ]
+}

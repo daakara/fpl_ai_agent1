@@ -1,0 +1,11 @@
+match_date,home_team,away_team,difficulty_rating
+2023-10-01,Team A,Team B,3
+2023-10-02,Team C,Team D,2
+2023-10-03,Team E,Team F,4
+2023-10-04,Team G,Team H,5
+2023-10-05,Team I,Team J,2
+2023-10-06,Team A,Team C,3
+2023-10-07,Team B,Team D,4
+2023-10-08,Team E,Team G,2
+2023-10-09,Team F,Team H,3
+2023-10-10,Team I,Team J,5

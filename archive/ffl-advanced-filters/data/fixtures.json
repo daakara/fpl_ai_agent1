@@ -1,0 +1,9 @@
+fpl_advanced_filters/
+│
+├── app.py                     # Main application file
+├── requirements.txt           # Project dependencies
+├── filters.py                 # Filter logic
+├── data_loader.py             # Data loading functions
+├── ui_components.py           # UI components for Streamlit
+├── utils.py                   # Utility functions
+└── style_manager.py           # Styling for the Streamlit app
