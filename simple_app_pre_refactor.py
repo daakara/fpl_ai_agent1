@@ -1,42 +1,31 @@
 """Create simple_app.py - completely self-contained
 Helper functions for fixture analysis
 """
-import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import warnings
-warnings.filterwarnings('ignore')
-
 import requests
 from typing import List, Dict, Tuple, Any
+import plotly.express as px
+import plotly.graph_objects as go  # Add this import
+import streamlit as st  # Add this import
 from datetime import datetime, timedelta
 import json
 import logging
+import numpy as np  # Add this import
 import urllib3
 
-# Import components and utilities
+# Enhanced Infrastructure Imports
 try:
-    from components.data_loader import fpl_data_loader
-    from components.team_recommender import TeamRecommender
-    from utils.logging_utils import FPLLogger
-    from utils.data_manager import DataManager
+    from config.app_config import config
+    from utils.error_handling import handle_errors, FPLError
+    from utils.caching import cached
+    from utils.ui_enhancements import ui
     CONFIG_AVAILABLE = True
     print("✅ Infrastructure modules loaded successfully")
-except ImportError:
-    # Fallback imports
-    class FPLLogger:
-        def __init__(self, name):
-            self.name = name
-        def info(self, msg): print(f"INFO: {msg}")
-        def error(self, msg): print(f"ERROR: {msg}")
-        def warning(self, msg): print(f"WARNING: {msg}")
-    
-    class DataManager:
-        def __init__(self):
-            pass
+except ImportError as e:
+    print(f"⚠️  Infrastructure modules not available: {e}")
+    CONFIG_AVAILABLE = False
+except Exception as e:
+    print(f"⚠️  Error initializing infrastructure: {e}")
     CONFIG_AVAILABLE = False
 
 # Initialize logger if available
