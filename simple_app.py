@@ -2283,28 +2283,15 @@ class FPLAnalyticsApp:
             return
         
         # **NEW: Enhanced tab structure for comprehensive analysis**
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "🔍 Smart Filters & Overview",
-            "📈 Performance Metrics", 
-            "⚖️ Player Comparison",
-            "🎯 Position Analysis",
-            "💡 AI Insights"
-        ])
-        
-        with tab1:
-            self._render_enhanced_player_filters(df)
-        
-        with tab2:
-            self._render_performance_metrics_dashboard(df)
-        
-        with tab3:
-            self._render_player_comparison_tool(df)
-        
-        with tab4:
-            self._render_position_specific_analysis(df)
-        
-        with tab5:
-            self._render_ai_player_insights(df)
+        self._render_enhanced_player_filters(df)
+        st.divider()
+        self._render_performance_metrics_dashboard(df)
+        st.divider()
+        self._render_player_comparison_tool(df)
+        st.divider()
+        self._render_position_specific_analysis(df)
+        st.divider()
+        self._render_ai_player_insights(df)
 
     def _render_enhanced_player_filters(self, df):
         """Enhanced filtering system with advanced metrics"""
@@ -3172,24 +3159,13 @@ class FPLAnalyticsApp:
             return
         
         # Team analysis tabs
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "🏆 Team Rankings", 
-            "⚔️ Head-to-Head", 
-            "📈 Performance Trends", 
-            "🎯 Team Recommendations"
-        ])
-        
-        with tab1:
-            self._render_team_rankings()
-        
-        with tab2:
-            self._render_head_to_head()
-        
-        with tab3:
-            self._render_performance_trends()
-        
-        with tab4:
-            self._render_team_specific_recommendations()
+        self._render_team_rankings()
+        st.divider()
+        self._render_head_to_head()
+        st.divider()
+        self._render_performance_trends()
+        st.divider()
+        self._render_team_specific_recommendations()
     
     def _render_team_rankings(self):
         """Render team rankings and statistics"""
@@ -3486,32 +3462,17 @@ class FPLAnalyticsApp:
             st.metric("Team Value", f"£{team_data.get('value', 1000)/10:.1f}m")
         
         # Team analysis tabs
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "👥 Current Squad", 
-            "📊 Performance", 
-            "🔄 Transfer Suggestions", 
-            "📈 Benchmarking",
-            "🎯 Chip Strategy",
-            "🧐 SWOT Analysis"
-        ])
-        
-        with tab1:
-            self._display_current_squad(team_data)
-        
-        with tab2:
-            self._display_performance_analysis(team_data)
-        
-        with tab3:
-            self._display_transfer_suggestions(team_data)
-        
-        with tab4:
-            self._display_benchmarking(team_data)
-        
-        with tab5:
-            self._display_chip_strategy(team_data)
-        
-        with tab6:
-            self._display_swot_analysis(team_data)
+        self._display_current_squad(team_data)
+        st.divider()
+        self._display_performance_analysis(team_data)
+        st.divider()
+        self._display_transfer_suggestions(team_data)
+        st.divider()
+        self._display_benchmarking(team_data)
+        st.divider()
+        self._display_chip_strategy(team_data)
+        st.divider()
+        self._display_swot_analysis(team_data)
         
         # Reset team button
         if st.button("🔄 Load Different Team"):
