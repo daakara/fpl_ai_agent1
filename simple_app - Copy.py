@@ -1116,159 +1116,217 @@ class ConfigurationManager:
         )
 
 class FPLTeamImporter:
-    """Handles importing user's current FPL team with better error handling"""
+    """Import FPL team data from the official API"""
     
     def __init__(self):
         self.base_url = "https://fantasy.premierleague.com/api"
-    
-    def get_user_team(self, team_id: int, gameweek: int = None) -> Optional[Dict]:
-        """Get user's team data from FPL API with improved error handling"""
-        try:
-            # Get current gameweek if not specified
-            if gameweek is None:
-                gameweek = self._get_current_gameweek()
-            
-            st.info(f"🔍 Trying to fetch team data for gameweek {gameweek}...")
-            
-            # Try multiple URL patterns and gameweeks
-            team_data = self._try_multiple_gameweeks(team_id, gameweek)
-            
-            if team_data:
-                return team_data
-            else:
-                st.error("❌ Could not fetch team data for any recent gameweeks")
-                return None
-                
-        except Exception as e:
-            st.error(f"Error fetching team data: {str(e)}")
-            return None
-    
-    def _try_multiple_gameweeks(self, team_id: int, starting_gameweek: int) -> Optional[Dict]:
-        """Try to fetch team data from multiple gameweeks"""
         
-        # Try current gameweek and previous few gameweeks
-        gameweeks_to_try = [starting_gameweek]
-        
-        # Add previous gameweeks (go back up to 5 gameweeks)
-        for i in range(1, 6):
-            if starting_gameweek - i >= 1:
-                gameweeks_to_try.append(starting_gameweek - i)
-        
-        # Add next gameweek in case current is not ready
-        if starting_gameweek + 1 <= 38:
-            gameweeks_to_try.insert(1, starting_gameweek + 1)
-        
-        for gw in gameweeks_to_try:
-            st.info(f"🔍 Trying gameweek {gw}...")
-            
-            # Try the standard picks URL
-            picks_url = f"{self.base_url}/entry/{team_id}/event/{gw}/picks/"
-            
-            try:
-                response = requests.get(picks_url, verify=False, timeout=30)
-                
-                if response.status_code == 200:
-                    team_data = response.json()
-                    if team_data and 'picks' in team_data and team_data['picks']:
-                        st.success(f"✅ Found team data for gameweek {gw}")
-                        return team_data
-                    else:
-                        st.warning(f"⚠️ Gameweek {gw} data is empty")
-                elif response.status_code == 404:
-                    st.warning(f"⚠️ Gameweek {gw} not found (404)")
-                else:
-                    st.warning(f"⚠️ Gameweek {gw} returned status {response.status_code}")
-                    
-            except Exception as e:
-                st.warning(f"⚠️ Error fetching gameweek {gw}: {str(e)[:50]}...")
-                continue
-        
-        return None
-    
-    def _get_current_gameweek(self) -> int:
-        """Get the current gameweek with better logic"""
-        try:
-            response = requests.get(f"{self.base_url}/bootstrap-static/", verify=False, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                events = data.get('events', [])
-                
-                # Find current gameweek
-                for event in events:
-                    if event.get('is_current', False):
-                        return event['id']
-                
-                # If no current gameweek, find the next one
-                for event in events:
-                    if event.get('is_next', False):
-                        return event['id']
-                
-                # Find most recent finished gameweek
-                finished_events = [e for e in events if e.get('finished', False)]
-                if finished_events:
-                    latest_finished = max(finished_events, key=lambda x: x['id'])
-                    return latest_finished['id']
-                
-                return 1  # Fallback
-            else:
-                return 1
-        except Exception:
-            return 1
-    
-    def get_team_info(self, team_id: int) -> Optional[Dict]:
+    def get_team_info(self, team_id: int) -> Dict:
         """Get basic team information"""
         try:
-            response = requests.get(f"{self.base_url}/entry/{team_id}/", verify=False, timeout=30)
-            
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return None
-                
+            url = f"{self.base_url}/entry/{team_id}/"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
             st.error(f"Error fetching team info: {str(e)}")
-            return None
+            return {}
+    
+    def get_user_team(self, team_id: int, gameweek: int = None) -> Dict:
+        """Get user's team for specific gameweek"""
+        try:
+            if gameweek:
+                url = f"{self.base_url}/entry/{team_id}/event/{gameweek}/picks/"
+            else:
+                # Get current gameweek
+                current_gw = self._get_current_gameweek()
+                if current_gw:
+                    url = f"{self.base_url}/entry/{team_id}/event/{current_gw}/picks/"
+                else:
+                    # Fallback to gameweek 1 if current can't be determined
+                    url = f"{self.base_url}/entry/{team_id}/event/1/picks/"
+            
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"Error fetching team data: {str(e)}")
+            return {}
+    
+    def _get_current_gameweek(self) -> int:
+        """Get current gameweek"""
+        try:
+            url = f"{self.base_url}/bootstrap-static/"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            events = data.get('events', [])
+            for event in events:
+                if event.get('is_current', False):
+                    return event.get('id', 1)
+            
+            # If no current event found, find next event
+            for event in events:
+                if event.get('is_next', False):
+                    return max(1, event.get('id', 1) - 1)
+            
+            return 1  # Fallback
+        except:
+            return 1  # Fallback
     
     def process_team_data(self, team_data: Dict, players_df: pd.DataFrame) -> Dict:
-        """Process raw team data into readable format"""
-        if not team_data or 'picks' not in team_data:
+        """Process raw team data into structured format"""
+        if not team_data or players_df.empty:
             return {}
         
-        processed_team = {
-            'starting_xi': [],
-            'bench': [],
-            'captain_id': None,
-            'vice_captain_id': None,
-            'total_cost': 0,
-            'formation': '4-4-2'
-        }
+        picks = team_data.get('picks', [])
+        if not picks:
+            return {}
         
-        return processed_team  # Simplified for now
+        # Create player ID to data mapping
+        player_map = {row['id']: row for _, row in players_df.iterrows()}
+        
+        starting_xi = []
+        bench = []
+        total_cost = 0
+        
+        for pick in picks:
+            player_id = pick.get('element')
+            player_data = player_map.get(player_id, {})
+            
+            if not player_data:
+                continue
+            
+            player_info = {
+                'id': player_id,
+                'name': player_data.get('web_name', 'Unknown'),
+                'position': player_data.get('position_name', 'Unknown'),
+                'team': player_data.get('team_short_name', 'Unknown'),
+                'cost': player_data.get('cost_millions', 0),
+                'total_points': player_data.get('total_points', 0),
+                'form': player_data.get('form', 0),
+                'is_captain': pick.get('is_captain', False),
+                'is_vice_captain': pick.get('is_vice_captain', False),
+                'multiplier': pick.get('multiplier', 1)
+            }
+            
+            total_cost += player_info['cost']
+            
+            # Determine if starting XI or bench based on position
+            position = pick.get('position', 0)
+            if position <= 11:
+                starting_xi.append(player_info)
+            else:
+                bench.append(player_info)
+        
+        return {
+            'starting_xi': starting_xi,
+            'bench': bench,
+            'total_cost': total_cost,
+            'picks_count': len(picks)
+        }
+
 
 class TeamAnalyzer:
-    """Analyzes imported team performance"""
+    """Analyze FPL team performance and provide insights"""
     
     def analyze_team(self, team_data: Dict, players_df: pd.DataFrame) -> Dict:
-        """Basic team analysis"""
-        return {
-            'team_summary': {'total_cost': team_data.get('total_cost', 0)},
-            'position_analysis': {},
-            'team_distribution': {},
-            'value_analysis': {'total_points': 0, 'points_per_million': 0},
-            'recommendations': []
+        """Analyze team and provide insights"""
+        if not team_data or players_df.empty:
+            return {}
+        
+        analysis = {
+            'team_summary': self._analyze_team_summary(team_data),
+            'position_analysis': self._analyze_positions(team_data),
+            'value_analysis': self._analyze_value(team_data),
+            'recommendations': self._generate_recommendations(team_data, players_df)
         }
-
-class AIPlayerRecommendationEngine(IRecommendationEngine):
-    """AI-powered player recommendation engine"""
+        
+        return analysis
     
-    def get_recommendations(self, data: pd.DataFrame, **kwargs) -> List[Dict]:
-        """Get basic recommendations"""
-        return []
+    def _analyze_team_summary(self, team_data: Dict) -> Dict:
+        """Analyze overall team statistics"""
+        starting_xi = team_data.get('starting_xi', [])
+        bench = team_data.get('bench', [])
+        
+        if not starting_xi:
+            return {}
+        
+        total_points = sum(player.get('total_points', 0) for player in starting_xi + bench)
+        avg_form = sum(float(player.get('form', 0)) for player in starting_xi) / len(starting_xi) if starting_xi else 0
+        
+        return {
+            'total_players': len(starting_xi) + len(bench),
+            'total_points': total_points,
+            'average_form': round(avg_form, 1),
+            'team_value': team_data.get('total_cost', 0)
+        }
     
-    def get_similar_players(self, target_player: Dict, players_df: pd.DataFrame, 
-                          n_recommendations: int = 5) -> List[Dict]:
-        """Find similar players"""
-        return []
+    def _analyze_positions(self, team_data: Dict) -> Dict:
+        """Analyze team by positions"""
+        starting_xi = team_data.get('starting_xi', [])
+        
+        positions = {}
+        for player in starting_xi:
+            pos = player.get('position', 'Unknown')
+            if pos not in positions:
+                positions[pos] = 0
+            positions[pos] += 1
+        
+        return positions
+    
+    def _analyze_value(self, team_data: Dict) -> Dict:
+        """Analyze team value and efficiency"""
+        starting_xi = team_data.get('starting_xi', [])
+        
+        if not starting_xi:
+            return {}
+        
+        total_cost = sum(player.get('cost', 0) for player in starting_xi)
+        total_points = sum(player.get('total_points', 0) for player in starting_xi)
+        
+        ppv = total_points / total_cost if total_cost > 0 else 0
+        
+        return {
+            'points_per_value': round(ppv, 1),
+            'most_expensive': max(starting_xi, key=lambda x: x.get('cost', 0)).get('name', 'Unknown'),
+            'best_value': max(starting_xi, key=lambda x: x.get('total_points', 0) / max(x.get('cost', 1), 1)).get('name', 'Unknown')
+        }
+    
+    def _generate_recommendations(self, team_data: Dict, players_df: pd.DataFrame) -> List[str]:
+        """Generate basic transfer recommendations"""
+        recommendations = []
+        
+        starting_xi = team_data.get('starting_xi', [])
+        
+        if not starting_xi:
+            return ["Unable to generate recommendations - no team data available"]
+        
+        # Basic recommendations based on form
+        low_form_players = [
+            player for player in starting_xi 
+            if float(player.get('form', 0)) < 3.0
+        ]
+        
+        if low_form_players:
+            player_names = [p.get('name', 'Unknown') for p in low_form_players[:2]]
+            recommendations.append(f"Consider transferring out low form players: {', '.join(player_names)}")
+        
+        # Value recommendations
+        high_cost_low_points = [
+            player for player in starting_xi
+            if player.get('cost', 0) > 8.0 and player.get('total_points', 0) < 50
+        ]
+        
+        if high_cost_low_points:
+            player_names = [p.get('name', 'Unknown') for p in high_cost_low_points[:1]]
+            recommendations.append(f"Review expensive underperformers: {', '.join(player_names)}")
+        
+        if not recommendations:
+            recommendations.append("Your team looks solid! Keep monitoring player form and fixtures.")
+        
+        return recommendations
 
 # ============================================================================
 # MAIN APPLICATION CLASS
@@ -3462,49 +3520,145 @@ class FPLAnalyticsApp:
         if st.button("🚀 Import My Team", type="primary") and team_id_input:
             try:
                 team_id = int(team_id_input)
-                
-                with st.spinner("Importing your FPL team..."):
-                    # Initialize importer
-                    importer = FPLTeamImporter()
-                    
-                    # Get team info
-                    team_info = importer.get_team_info(team_id)
-                    
-                    if team_info:
-                        st.success(f"✅ Found team: {team_info.get('name', 'Unknown')}")
-                        
-                        # Get team data
-                        team_data = importer.get_user_team(team_id, gameweek_input)
-                        
-                        if team_data:
-                            # Process team data
-                            processed_team = importer.process_team_data(team_data, st.session_state.players_df)
-                            
-                            if processed_team:
-                                # Store in session state
-                                st.session_state.imported_team = processed_team
-                                st.session_state.team_info = team_info
-                                
-                                st.success("✅ Team imported successfully!")
-                                
-                                # Display basic info for now
-                                st.write(f"**Team Name:** {team_info.get('name', 'Unknown')}")
-                                st.write(f"**Manager:** {team_info.get('player_first_name', '')} {team_info.get('player_last_name', '')}")
-                                st.write(f"**Overall Rank:** {team_info.get('summary_overall_rank', 'N/A'):,}")
-                            else:
-                                st.error("❌ Failed to process team data")
-                        else:
-                            st.error("❌ Failed to fetch team data. Check your Team ID and try again.")
-                    else:
-                        st.error("❌ Team not found. Please check your Team ID.")
+                self._load_fpl_team(team_id, gameweek_input)
                         
             except ValueError:
-                st.error("❌ Please enter a valid numeric Team ID")
+                st.error("Please enter a valid numeric Team ID")
             except Exception as e:
-                st.error(f"❌ Error importing team: {str(e)}")
+                st.error(f"Error importing team: {str(e)}")
+        
+        # Display imported team if available
+        if 'imported_team' in st.session_state and st.session_state.imported_team:
+            self._display_imported_team(st.session_state.imported_team)
         
         # Show info about team import feature
         st.info("🚧 Full team analysis features coming soon! Currently supporting basic team import.")
+
+    def _load_fpl_team(self, team_id: int, gameweek: int = None):
+        """Load FPL team data from API"""
+        try:
+            importer = FPLTeamImporter()
+            
+            with st.spinner("Loading your FPL team data..."):
+                # Get team info
+                team_info = importer.get_team_info(team_id)
+                
+                if team_info:
+                    st.success(f"✅ Found team: {team_info.get('name', 'Unknown')}")
+                    
+                    # Get team data
+                    team_data = importer.get_user_team(team_id, gameweek)
+                    
+                    if team_data:
+                        # Process team data
+                        processed_team = importer.process_team_data(team_data, st.session_state.players_df)
+                        
+                        # Store in session state
+                        st.session_state.imported_team = {
+                            'team_info': team_info,
+                            'team_data': processed_team,
+                            'raw_data': team_data
+                        }
+                        
+                        st.success("✅ Team imported successfully!")
+                        
+                        # Basic analysis
+                        analyzer = TeamAnalyzer()
+                        analysis = analyzer.analyze_team(processed_team, st.session_state.players_df)
+                        st.session_state.team_analysis = analysis
+                        
+                    else:
+                        st.error("❌ Could not load team data. Please check your Team ID and try again.")
+                else:
+                    st.error("❌ Could not find team information. Please check your Team ID.")
+                    
+        except Exception as e:
+            st.error(f"Error loading team: {str(e)}")
+            st.info("This might be due to FPL API limitations or the team being private.")
+
+    def _display_imported_team(self, imported_team: Dict):
+        """Display imported team data"""
+        st.divider()
+        st.subheader("📊 Your FPL Team Analysis")
+        
+        team_info = imported_team.get('team_info', {})
+        team_data = imported_team.get('team_data', {})
+        
+        # Team overview
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Team Name", team_info.get('name', 'Unknown'))
+        with col2:
+            st.metric("Overall Rank", f"{team_info.get('summary_overall_rank', 'N/A'):,}")
+        with col3:
+            st.metric("Total Points", f"{team_info.get('summary_overall_points', 'N/A'):,}")
+        with col4:
+            st.metric("Team Value", f"£{team_data.get('total_cost', 0):.1f}m")
+        
+        # Team composition
+        if team_data.get('starting_xi') or team_data.get('bench'):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**⚽ Starting XI:**")
+                starting_xi = team_data.get('starting_xi', [])
+                if starting_xi:
+                    for player in starting_xi:
+                        captain_indicator = " (C)" if player.get('is_captain') else " (VC)" if player.get('is_vice_captain') else ""
+                        st.write(f"• {player.get('name', 'Unknown')}{captain_indicator}")
+                else:
+                    st.write("No starting XI data available")
+            
+            with col2:
+                st.write("**🪑 Bench:**")
+                bench = team_data.get('bench', [])
+                if bench:
+                    for player in bench:
+                        st.write(f"• {player.get('name', 'Unknown')}")
+                else:
+                    st.write("No bench data available")
+        
+        # Team analysis
+        if 'team_analysis' in st.session_state:
+            analysis = st.session_state.team_analysis
+            
+            st.divider()
+            st.subheader("📈 Team Analysis")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.write("**Team Summary:**")
+                summary = analysis.get('team_summary', {})
+                for key, value in summary.items():
+                    st.write(f"• {key.replace('_', ' ').title()}: {value}")
+            
+            with col2:
+                st.write("**Position Analysis:**")
+                pos_analysis = analysis.get('position_analysis', {})
+                if pos_analysis:
+                    for position, data in pos_analysis.items():
+                        st.write(f"• {position}: {data}")
+                else:
+                    st.write("Position analysis not available")
+            
+            with col3:
+                st.write("**Value Analysis:**")
+                value_analysis = analysis.get('value_analysis', {})
+                for key, value in value_analysis.items():
+                    st.write(f"• {key.replace('_', ' ').title()}: {value}")
+        
+        # Recommendations
+        if st.session_state.get('team_analysis', {}).get('recommendations'):
+            st.divider()
+            st.subheader("💡 Transfer Recommendations")
+            
+            recommendations = st.session_state.team_analysis['recommendations']
+            for rec in recommendations[:5]:  # Show top 5 recommendations
+                st.write(f"• {rec}")
+        else:
+            st.info("💡 Detailed recommendations will be available in future updates!")
 
 # ============================================================================
 # APPLICATION ENTRY POINT

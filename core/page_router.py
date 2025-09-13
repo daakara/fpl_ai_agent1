@@ -12,9 +12,6 @@ class PageRouter:
         """Initialize the page router"""
         self.pages = {
             "Dashboard": "🏠",
-            "Player Analysis": "👤", 
-            "Fixture Analysis": "📅",
-            "My FPL Team": "⚽",
             "Transfer Recommendations": "🔄",
             "Captain Picks": "👑",
             "Team Planning": "📋",

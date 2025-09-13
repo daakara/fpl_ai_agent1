@@ -3,9 +3,6 @@ import streamlit as st
 """
 Main Application Controller - Coordinates all components
 """
-from pages.player_analysis_page import PlayerAnalysisPage
-from pages.fixture_analysis_page import FixtureAnalysisPage  
-from pages.my_team_page import MyTeamPage
 from services.fpl_data_service import FPLDataService
 from core.page_router import PageRouter
 
@@ -20,11 +17,7 @@ class FPLAppController:
         self.page_router = PageRouter()
         
         # Initialize page components
-        self.pages = {
-            "player_analysis": PlayerAnalysisPage(),
-            "fixture_analysis": FixtureAnalysisPage(),
-            "my_team": MyTeamPage()
-        }
+        self.pages = {}
     
     def setup_page_config(self):
         """Setup Streamlit page configuration"""
@@ -51,16 +44,18 @@ class FPLAppController:
             selected_page = self.page_router.render_sidebar_navigation()
             
             # Route to appropriate page
-            if selected_page == "dashboard":
+            if selected_page == "Dashboard":
                 self.render_dashboard()
-            elif selected_page == "players":
-                self.pages["player_analysis"].render()
-            elif selected_page == "fixtures":
-                self.pages["fixture_analysis"].render()
-            elif selected_page == "my_team":
-                self.pages["my_team"].render()
+            elif selected_page == "Transfer Recommendations":
+                st.write("Transfer Recommendations Page")
+            elif selected_page == "Captain Picks":
+                st.write("Captain Picks Page")
+            elif selected_page == "Team Planning":
+                st.write("Team Planning Page")
+            elif selected_page == "Settings":
+                st.write("Settings Page")
             else:
-                st.error(f"Unknown page: {selected_page}")
+                self.render_dashboard() # Default to dashboard
                 
         except Exception as e:
             st.error(f"Application error: {str(e)}")

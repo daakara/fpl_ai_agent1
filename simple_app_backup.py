@@ -1,16 +1,16 @@
-"""Create simple_app.py - completely self-contained
-Helper functions for fixture analysis
+"""
+FPL Analytics Dashboard - Complete self-contained application
 """
 import pandas as pd
 import requests
 from typing import List, Dict, Tuple, Any
 import plotly.express as px
-import plotly.graph_objects as go  # Add this import
-import streamlit as st  # Add this import
+import plotly.graph_objects as go
+import streamlit as st
 from datetime import datetime, timedelta
 import json
 import logging
-import numpy as np  # Add this import
+import numpy as np
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -66,6 +66,7 @@ def identify_fixture_opportunities(fixtures_df: pd.DataFrame, threshold: float =
     """Identify fixture opportunities for different strategies"""
     if fixtures_df.empty:
         return {}
+    
     opportunities = {
         'best_attack': [],
         'best_defense': [],
@@ -73,17 +74,26 @@ def identify_fixture_opportunities(fixtures_df: pd.DataFrame, threshold: float =
         'worst_fixtures': [],
         'fixture_swings': []
     }
+    
     # Best attacking fixtures
     attack_teams = fixtures_df.groupby(['team_id', 'team_name'])['attack_fdr'].mean()
-    opportunities['best_attack'] = attack_teams[attack_teams <= threshold].sort_values().head(5).to_dict()
+    good_attack = attack_teams[attack_teams <= threshold].sort_values().head(5)
+    opportunities['best_attack'] = [(team, fdr) for team, fdr in good_attack.items()]
+    
     # Best defensive fixtures
     defense_teams = fixtures_df.groupby(['team_id', 'team_name'])['defense_fdr'].mean()
-    opportunities['best_defense'] = defense_teams[defense_teams <= threshold].sort_values().head(5).to_dict()
+    good_defense = defense_teams[defense_teams <= threshold].sort_values().head(5)
+    opportunities['best_defense'] = [(team, fdr) for team, fdr in good_defense.items()]
+    
     # Best combined fixtures
     combined_teams = fixtures_df.groupby(['team_id', 'team_name'])['combined_fdr'].mean()
-    opportunities['best_combined'] = combined_teams[combined_teams <= threshold].sort_values().head(5).to_dict()
+    good_combined = combined_teams[combined_teams <= threshold].sort_values().head(5)
+    opportunities['best_combined'] = [(team, fdr) for team, fdr in good_combined.items()]
+    
     # Worst fixtures to avoid
-    opportunities['worst_fixtures'] = combined_teams[combined_teams >= 4.0].sort_values(ascending=False).head(5).to_dict()
+    bad_fixtures = combined_teams[combined_teams >= 4.0].sort_values(ascending=False).head(5)
+    opportunities['worst_fixtures'] = [(team, fdr) for team, fdr in bad_fixtures.items()]
+    
     return opportunities
 
 class FixtureDataLoader:
@@ -350,6 +360,8 @@ class FPLAnalyticsApp:
     """Main FPL Analytics Application"""
     
     def __init__(self):
+        self.base_url = "https://fantasy.premierleague.com/api"
+        self.logger = logging.getLogger(__name__)
         self.setup_page_config()
         self.initialize_session_state()
     
@@ -430,17 +442,9 @@ class FPLAnalyticsApp:
                 0
             ).round(2)
             
-            # Ensure form column exists and handle missing values
-            if 'form' not in players_df.columns:
-                players_df['form'] = 0.0
-            else:
-                players_df['form'] = pd.to_numeric(players_df['form'], errors='coerce').fillna(0.0)
-            
-            # Ensure selected_by_percent exists
-            if 'selected_by_percent' not in players_df.columns:
-                players_df['selected_by_percent'] = 0.0
-            else:
-                players_df['selected_by_percent'] = pd.to_numeric(players_df['selected_by_percent'], errors='coerce').fillna(0.0)
+            # Handle form and ownership properly
+            players_df['form'] = pd.to_numeric(players_df['form'], errors='coerce').fillna(0.0) if 'form' in players_df.columns else 0.0
+            players_df['selected_by_percent'] = pd.to_numeric(players_df['selected_by_percent'], errors='coerce').fillna(0.0) if 'selected_by_percent' in players_df.columns else 0.0
             
             # Final debug: Print final column names
             st.write("Debug - Final column names:", list(players_df.columns))
@@ -505,9 +509,16 @@ class FPLAnalyticsApp:
             ).round(2)
             
             # Handle form and ownership
-            players_df['form'] = pd.to_numeric(players_df.get('form', 0), errors='coerce').fillna(0.0)
-            players_df['selected_by_percent'] = pd.to_numeric(players_df.get('selected_by_percent', 0), errors='coerce').fillna(0.0)
+            if 'form' in players_df.columns:
+                players_df['form'] = pd.to_numeric(players_df['form'], errors='coerce').fillna(0.0)
+            else:
+                players_df['form'] = 0.0
             
+            if 'selected_by_percent' in players_df.columns:
+                players_df['selected_by_percent'] = pd.to_numeric(players_df['selected_by_percent'], errors='coerce').fillna(0.0)
+            else:
+                players_df['selected_by_percent'] = 0.0
+
             st.success("✅ Data loaded successfully using alternative method!")
             st.write("Final columns:", list(players_df.columns))
             
@@ -528,7 +539,6 @@ class FPLAnalyticsApp:
             "👥 Player Analysis": "players", 
             "🎯 Fixture Difficulty": "fixtures",
             "🔍 Advanced Filters": "filters",
-            "📊 Team Analysis": "teams",
             "👤 My FPL Team": "my_team",          # NEW: Your actual FPL team
             "🤖 AI Recommendations": "ai_recommendations",
             "⚽ Team Builder": "team_builder",
@@ -547,7 +557,7 @@ class FPLAnalyticsApp:
         if st.session_state.data_loaded:
             st.sidebar.success("✅ Data Loaded")
             if not st.session_state.players_df.empty:
-                st.sidebar.info(f"📊 {len(st.session_state.players_df)} players loaded")
+                st.sidebar.info(f"Players: {len(st.session_state.players_df)}")
         else:
             st.sidebar.warning("⚠️ No data loaded")
         
@@ -594,12 +604,10 @@ class FPLAnalyticsApp:
             
             with col1:
                 st.info("""
-                📊 **What is FDR?**
-                - **Attack FDR**: How easy it is for a team's attackers to score (lower = easier opponents to score against)
-                - **Defense FDR**: How easy it is for a team's defenders to keep clean sheets (lower = weaker attacking opponents)
-                - **Combined FDR**: Overall fixture difficulty considering both attack and defense
+                - **Defense FDR**: How easy it is for a team's defenders to keep clean sheets (lower = weaker attacking opponents).
+                - **Combined FDR**: Overall fixture difficulty considering both attack and defense.
                 
-                🎯 **How to use**: Green = Good fixtures, Red = Difficult fixtures
+                🎯 **How to use**: Green = Good fixtures, Red = Difficult fixtures.
                 """)
             
             with col2:
@@ -644,7 +652,6 @@ class FPLAnalyticsApp:
         
         # Create enhanced tabs
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "📊 Overview", 
             "⚔️ Attack Analysis", 
             "🛡️ Defense Analysis", 
             "🎯 Transfer Targets",
@@ -666,652 +673,185 @@ class FPLAnalyticsApp:
         with tab5:
             self._render_fixture_swings(fixtures_df)
     
-    def _render_fdr_overview(self, fixtures_df, fdr_visualizer, gameweeks_ahead, sort_by, ascending_sort):
-        """Enhanced FDR overview with better metrics and insights"""
-        st.subheader("📊 FDR Overview - Next 5 Fixtures")
+    def _render_fixture_swings(self, fixtures_df):
+        """Render fixture swing analysis"""
+        st.subheader("📈 Fixture Swings Analysis")
         
-        if fixtures_df.empty:
-            st.warning("No fixture data available")
+        # This would analyze dramatic changes in fixture difficulty
+        st.info("🚧 Fixture swing analysis coming soon!")
+        
+        # Placeholder for future implementation
+        if not fixtures_df.empty:
+            st.write("**🔄 Upcoming Fixture Changes**")
+            st.write("• Teams moving from hard to easy fixtures")
+            st.write("• Teams moving from easy to hard fixtures")
+            st.write("• Optimal transfer timing recommendations")
+            
+            # Could add actual swing analysis here
+            sample_swings = [
+                {"team": "Arsenal", "current": "Hard", "upcoming": "Easy", "action": "Buy"},
+                {"team": "Chelsea", "current": "Easy", "upcoming": "Hard", "action": "Sell"},
+                {"team": "Newcastle", "current": "Mixed", "upcoming": "Good", "action": "Consider"}
+            ]
+            
+            for swing in sample_swings:
+                if swing["action"] == "Buy":
+                    st.success(f"🟢 **{swing['team']}**: {swing['current']} → {swing['upcoming']} - {swing['action']}")
+                elif swing["action"] == "Sell":
+                    st.error(f"🔴 **{swing['team']}**: {swing['current']} → {swing['upcoming']} - {swing['action']}")
+                else:
+                    st.info(f"🟡 **{swing['team']}**: {swing['current']} → {swing['upcoming']} - {swing['action']}")
+
+    def render_my_team(self):
+        """Enhanced My FPL Team analysis and import"""
+        st.header("👤 My FPL Team")
+        
+        # Team import section
+        if 'my_team_loaded' not in st.session_state or not st.session_state.my_team_loaded:
+            st.subheader("📥 Import Your FPL Team")
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                team_id = st.number_input(
+                    "Enter your FPL Team ID:",
+                    min_value=1,
+                    max_value=10000000,
+                    value=1,
+                    help="Find your Team ID in the FPL website URL"
+                )
+            
+            with col2:
+                if st.button("📥 Load Team", type="primary"):
+                    team_data = self._load_fpl_team(team_id)
+                    if team_data:
+                        st.session_state.my_team_id = team_id
+                        st.session_state.my_team_data = team_data
+                        st.session_state.my_team_loaded = True
+                        st.success("✅ Team loaded successfully!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to load team. Please check your Team ID.")
+            
+            # Instructions
+            with st.expander("💡 How to find your Team ID", expanded=False):
+                st.markdown("""
+                **Steps to find your FPL Team ID:**
+                1. Go to the [FPL website](https://fantasy.premierleague.com/)
+                2. Navigate to "Points" or "My Team"
+                3. Look at the URL - it will show: `fantasy.premierleague.com/entry/YOUR_TEAM_ID/event/X`
+                4. Your Team ID is the number after `/entry/`
+                
+                **Example:** If URL is `fantasy.premierleague.com/entry/123456/event/10`, your Team ID is `123456`
+                """)
+            
             return
         
-        # Enhanced key metrics
+        # Display loaded team
+        team_data = st.session_state.my_team_data
+        
+        # Team overview with safe formatting
+        team_name = team_data.get('entry_name', 'Your Team')
+        team_id = st.session_state.my_team_id
+        st.subheader(f"🏆 {team_name} (ID: {team_id})")
+        
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            total_fixtures = len(fixtures_df)
-            teams_count = fixtures_df['team_short_name'].nunique()
-            st.metric("📊 Fixtures Analyzed", f"{total_fixtures} ({teams_count} teams)")
+            # Safe formatting for rank - handle None values
+            overall_rank = team_data.get('summary_overall_rank')
+            if overall_rank is not None and overall_rank > 0:
+                st.metric("Overall Rank", f"{overall_rank:,}")
+            else:
+                st.metric("Overall Rank", "N/A")
         
         with col2:
-            if 'attack_fdr' in fixtures_df.columns:
-                avg_attack_fdr = fixtures_df['attack_fdr'].mean()
-                best_attack_team = fixtures_df.groupby('team_short_name')['attack_fdr'].mean().idxmin()
-                st.metric("⚔️ Best Attack Fixtures", f"{best_attack_team}", f"Avg: {avg_attack_fdr:.2f}")
+            # Safe formatting for points - handle None values
+            total_points = team_data.get('summary_overall_points')
+            if total_points is not None:
+                st.metric("Total Points", f"{total_points:,}")
             else:
-                st.metric("⚔️ Attack FDR", "N/A")
+                st.metric("Total Points", "N/A")
         
         with col3:
-            if 'defense_fdr' in fixtures_df.columns:
-                avg_defense_fdr = fixtures_df['defense_fdr'].mean()
-                best_defense_team = fixtures_df.groupby('team_short_name')['defense_fdr'].mean().idxmin()
-                st.metric("🛡️ Best Defense Fixtures", f"{best_defense_team}", f"Avg: {avg_defense_fdr:.2f}")
+            # Safe formatting for gameweek rank - handle None values
+            gw_rank = team_data.get('summary_event_rank')
+            if gw_rank is not None and gw_rank > 0:
+                st.metric("Gameweek Rank", f"{gw_rank:,}")
             else:
-                st.metric("🛡️ Defense FDR", "N/A")
+                st.metric("Gameweek Rank", "N/A")
         
         with col4:
-            if 'combined_fdr' in fixtures_df.columns:
-                avg_combined_fdr = fixtures_df['combined_fdr'].mean()
-                best_overall_team = fixtures_df.groupby('team_short_name')['combined_fdr'].mean().idxmin()
-                st.metric("🎯 Best Overall Fixtures", f"{best_overall_team}", f"Avg: {avg_combined_fdr:.2f}")
+            # Safe formatting for team value - handle None values
+            team_value = team_data.get('value', 1000)
+            if team_value is not None:
+                st.metric("Team Value", f"£{team_value/10:.1f}m")
             else:
-                st.metric("🎯 Combined FDR", "N/A")
+                st.metric("Team Value", "£100.0m")
         
-        st.divider()
+        # Enhanced team analysis tabs with improved structure
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "👥 Squad Analysis", 
+            "🔄 Transfer Intelligence", 
+            "🎯 Strategy & Planning",
+            "💎 Chip Strategy",
+            "📈 SWOT Analysis"
+        ])
         
-        # Enhanced FDR Heatmap with better styling
-        if 'combined_fdr' in fixtures_df.columns:
-            st.subheader("🌡️ FDR Heatmap - Next 5 Fixtures")
+        with tab1:
+            self._display_squad_analysis_enhanced(team_data)
+        
+        with tab2:
+            self._display_performance_benchmarking_enhanced(team_data)
+        
+        with tab3:
+            self._display_transfer_intelligence(team_data)
+        
+        with tab4:
+            self._display_strategy_planning(team_data)
+        
+        with tab5:
+            self._display_chip_strategy_enhanced(team_data)
             
-            # Add fixture opponent info to heatmap
-            if 'opponent_short_name' in fixtures_df.columns:
-                # Create enhanced heatmap with opponent names
-                fig_heatmap = self._create_enhanced_fdr_heatmap(fixtures_df, 'combined')
-                st.plotly_chart(fig_heatmap, use_container_width=True)
-            else:
-                fig_heatmap = fdr_visualizer.create_fdr_heatmap(fixtures_df, 'combined')
-                st.plotly_chart(fig_heatmap, use_container_width=True)
-            
-            # FDR Legend
-            st.markdown("""
-            **🎯 FDR Guide:**
-            - 🟢 **1-2**: Excellent fixtures - Target these teams' players
-            - 🟡 **3**: Average fixtures - Neutral stance
-            - 🟠 **4**: Difficult fixtures - Consider avoiding
-            - 🔴 **5**: Very difficult - Strong avoid
-            """)
+            # Add SWOT analysis to the chip strategy tab for now
+            st.divider()
+            st.subheader("📈 SWOT Analysis")
+            self._display_swot_analysis_enhanced(team_data)
         
-        # Enhanced team summary table with more insights
-        st.subheader("📋 Detailed Team FDR Analysis")
-        
-        if fixtures_df.empty:
-            st.warning("No data for team summary")
-            return
-        
-        # Create comprehensive team summary
-        team_summary = self._create_enhanced_team_summary(fixtures_df, sort_by, ascending_sort)
-        
-        if not team_summary.empty:
-            # Add color coding to the dataframe display
-            def highlight_fdr(val):
-                if pd.isna(val):
-                    return ''
-                try:
-                    val = float(val)
-                    if val <= 2:
-                        return 'background-color: #90EE90'  # Light green
-                    elif val <= 2.5:
-                        return 'background-color: #FFFF99'  # Light yellow
-                    elif val <= 3.5:
-                        return 'background-color: #FFE4B5'  # Light orange
-                    elif val <= 4:
-                        return 'background-color: #FFB6C1'  # Light red
-                    else:
-                        return 'background-color: #FF6B6B'  # Red
-                except:
-                    return ''
-            
-            # Apply styling only to FDR columns
-            fdr_columns = [col for col in team_summary.columns if 'FDR' in col]
-            styled_df = team_summary.style.applymap(highlight_fdr, subset=fdr_columns)
-            
-            st.dataframe(styled_df, use_container_width=True)
-        else:
-            st.warning("No FDR data available for team summary")
-    
-    def _render_attack_analysis(self, fixtures_df, fdr_visualizer, fdr_threshold, show_opponents):
-        """Enhanced attack FDR analysis"""
-        st.subheader("⚔️ Attack FDR Analysis")
-        st.info("🎯 Lower Attack FDR = Easier to score goals. Target these teams' forwards and attacking midfielders!")
-        
-        if fixtures_df.empty or 'attack_fdr' not in fixtures_df.columns:
-            st.warning("Attack FDR data not available")
-            return
-        
-        # Attack FDR insights
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Best attacking fixtures with detailed breakdown
-            st.subheader("🟢 Best Attacking Fixtures")
-            attack_summary = fixtures_df.groupby('team_short_name').agg({
-                'attack_fdr': ['mean', 'min', 'count'],
-                'opponent_short_name': lambda x: ' → '.join(x.head(3)) if show_opponents else ''
-            }).round(2)
-            
-            attack_summary.columns = ['Avg_FDR', 'Best_FDR', 'Fixtures', 'Next_3_Opponents']
-            attack_summary = attack_summary.reset_index()
-            attack_summary = attack_summary.sort_values('Avg_FDR').head(10)
-            
-            for idx, row in attack_summary.iterrows():
-                avg_fdr = row['Avg_FDR']
-                color = "🟢" if avg_fdr <= 2 else "🟡" if avg_fdr <= 2.5 else "🔴"
-                
-                with st.expander(f"{color} **{row['team_short_name']}** - Avg FDR: {avg_fdr:.2f}"):
-                    st.write(f"🎯 **Average FDR**: {avg_fdr:.2f}")
-                    st.write(f"⭐ **Best upcoming fixture**: {row['Best_FDR']:.0f}")
-                    st.write(f"📊 **Total fixtures**: {row['Fixtures']:.0f}")
-                    if show_opponents and row['Next_3_Opponents']:
-                        st.write(f"🆚 **Next 3 opponents**: {row['Next_3_Opponents']}")
-                    
-                    # Player recommendations
-                    if avg_fdr <= fdr_threshold:
-                        st.success("💡 **Recommendation**: Target forwards and attacking midfielders")
-                    else:
-                        st.warning("⚠️ **Recommendation**: Avoid or consider selling attackers")
-        
-        with col2:
-            # Attack FDR visualization
-            fig_attack = fdr_visualizer.create_fdr_heatmap(fixtures_df, 'attack')
-            st.plotly_chart(fig_attack, use_container_width=True)
-        
-        # Attack fixture opportunities
-        st.subheader("🎯 Attack Fixture Opportunities")
-        opportunities = self._identify_attack_opportunities(fixtures_df, fdr_threshold)
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.write("**🚀 Immediate Targets (Next 2 GWs)**")
-            for team, fdr in opportunities.get('immediate', []):
-                st.write(f"• **{team}**: {fdr:.2f} FDR")
-        
-        with col2:
-            st.write("**📈 Medium-term Targets (GW 3-5)**")
-            for team, fdr in opportunities.get('medium_term', []):
-                st.write(f"• **{team}**: {fdr:.2f} FDR")
-        
-        with col3:
-            st.write("**⚠️ Avoid These Teams**")
-            for team, fdr in opportunities.get('avoid', []):
-                st.write(f"• **{team}**: {fdr:.2f} FDR")
-    
-    def _render_defense_analysis(self, fixtures_df, fdr_visualizer, fdr_threshold, show_opponents):
-        """Enhanced defense FDR analysis"""
-        st.subheader("🛡️ Defense FDR Analysis")
-        st.info("🏠 Lower Defense FDR = Easier to keep clean sheets. Target these teams' defenders and goalkeepers!")
-        
-        if fixtures_df.empty or 'defense_fdr' not in fixtures_df.columns:
-            st.warning("Defense FDR data not available")
-            return
-        
-        # Defense-specific insights
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🟢 Best Defensive Fixtures")
-            defense_summary = fixtures_df.groupby('team_short_name').agg({
-                'defense_fdr': ['mean', 'min', 'count'],
-                'opponent_short_name': lambda x: ' → '.join(x.head(3)) if show_opponents else ''
-            }).round(2)
-            
-            defense_summary.columns = ['Avg_FDR', 'Best_FDR', 'Fixtures', 'Next_3_Opponents']
-            defense_summary = defense_summary.reset_index()
-            defense_summary = defense_summary.sort_values('Avg_FDR').head(8)
-            
-            for idx, row in defense_summary.iterrows():
-                avg_fdr = row['Avg_FDR']
-                color = "🟢" if avg_fdr <= 2 else "🟡" if avg_fdr <= 2.5 else "🔴"
-                
-                st.write(f"{color} **{row['team_short_name']}** - {avg_fdr:.2f} FDR")
-                if show_opponents and row['Next_3_Opponents']:
-                    st.caption(f"vs {row['Next_3_Opponents']}")
-        
-        with col2:
-            # Defense FDR heatmap
-            fig_defense = fdr_visualizer.create_fdr_heatmap(fixtures_df, 'defense')
-            st.plotly_chart(fig_defense, use_container_width=True)
-        
-        # Clean sheet probability predictions
-        st.subheader("🎯 Clean Sheet Probability Insights")
-        clean_sheet_data = self._calculate_clean_sheet_probabilities(fixtures_df)
-        
-        if not clean_sheet_data.empty:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**🏆 Highest Clean Sheet Probability**")
-                top_cs = clean_sheet_data.head(5)
-                for _, row in top_cs.iterrows():
-                    prob = row['clean_sheet_prob']
-                    color = "🟢" if prob >= 70 else "🟡" if prob >= 50 else "🔴"
-                    st.write(f"{color} **{row['team_short_name']}**: {prob:.0f}%")
-            
-            with col2:
-                # Clean sheet probability chart
-                fig_cs = px.bar(
-                    clean_sheet_data.head(10),
-                    x='clean_sheet_prob',
-                    y='team_short_name',
-                    orientation='h',
-                    title="Clean Sheet Probability (%)",
-                    color='clean_sheet_prob',
-                    color_continuous_scale='RdYlGn'
-                )
-                st.plotly_chart(fig_cs, use_container_width=True)
-    
-    def _render_transfer_targets(self, fixtures_df, fdr_threshold):
-        """Enhanced transfer targets based on fixture analysis"""
-        st.subheader("🎯 Transfer Targets & Recommendations")
-        st.info("💡 Based on fixture difficulty analysis - players to target or avoid")
-        
-        if fixtures_df.empty:
-            st.warning("No fixture data for transfer analysis")
-            return
-        
-        # Get player data if available
-        if st.session_state.data_loaded and not st.session_state.players_df.empty:
-            players_df = st.session_state.players_df
-            
-            # Merge fixtures with player data
-            transfer_analysis = self._create_transfer_recommendations(fixtures_df, players_df, fdr_threshold)
-            
-            # Create transfer recommendation tabs
-            target_tab, avoid_tab, differential_tab = st.tabs(["🎯 Targets", "❌ Avoid", "💎 Differentials"])
-            
-            with target_tab:
-                st.subheader("🚀 Players to Target")
-                
-                for position in ['Forward', 'Midfielder', 'Defender', 'Goalkeeper']:
-                    pos_targets = transfer_analysis.get(f'{position.lower()}_targets', [])
-                    
-                    if pos_targets:
-                        st.write(f"**{position}s:**")
-                        
-                        for player in pos_targets[:5]:  # Top 5 per position
-                            with st.expander(f"⭐ {player['name']} ({player['team']}) - £{player['price']:.1f}m"):
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    st.write(f"💰 **Price**: £{player['price']:.1f}m")
-                                    st.write(f"📊 **Points**: {player['points']}")
-                                    st.write(f"🔥 **Form**: {player['form']:.1f}")
-                                
-                                with col2:
-                                    st.write(f"🎯 **FDR**: {player['avg_fdr']:.2f}")
-                                    st.write(f"👥 **Ownership**: {player['ownership']:.1f}%")
-                                    st.write(f"💎 **Value**: {player['points_per_million']:.1f}")
-                                
-                                # Fixture preview
-                                st.write(f"📅 **Next 3 fixtures**: {player.get('next_fixtures', 'N/A')}")
-            
-            with avoid_tab:
-                st.subheader("❌ Players to Avoid/Sell")
-                
-                avoid_players = transfer_analysis.get('avoid_players', [])
-                
-                if avoid_players:
-                    for player in avoid_players[:10]:
-                        st.write(f"🔴 **{player['name']}** ({player['team']}) - FDR: {player['avg_fdr']:.2f}")
-                        st.caption(f"Difficult fixtures ahead - consider selling")
-                else:
-                    st.info("No obvious players to avoid based on fixtures")
-            
-            with differential_tab:
-                st.subheader("💎 Differential Picks")
-                st.info("Low ownership players with good fixtures")
-                
-                differentials = transfer_analysis.get('differentials', [])
-                
-                if differentials:
-                    for player in differentials[:8]:
-                        with st.expander(f"💎 {player['name']} ({player['team']}) - {player['ownership']:.1f}% owned"):
-                            st.write(f"Good fixtures (FDR: {player['avg_fdr']:.2f}) with low ownership")
-                            st.write(f"Price: £{player['price']:.1f}m | Points: {player['points']}")
-                else:
-                    st.info("No clear differential opportunities identified")
-        
-        else:
-            # Simple fixture-based recommendations without player data
-            st.info("💡 Load player data to see detailed transfer recommendations")
-            
-            # Basic team recommendations
-            if 'combined_fdr' in fixtures_df.columns:
-                best_fixtures = fixtures_df.groupby('team_short_name')['combined_fdr'].mean().nsmallest(5)
-                worst_fixtures = fixtures_df.groupby('team_short_name')['combined_fdr'].mean().nlargest(5)
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write("**🎯 Target these teams' players:**")
-                    for team, fdr in best_fixtures.items():
-                        st.write(f"• **{team}** (FDR: {fdr:.2f})")
-                
-                with col2:
-                    st.write("**❌ Avoid these teams' players:**")
-                    for team, fdr in worst_fixtures.items():
-                        st.write(f"• **{team}** (FDR: {fdr:.2f})")
-    
-    def _render_fixture_swings(self, fixtures_df):
-        """Analyze fixture difficulty swings and upcoming changes"""
-        st.subheader("📈 Fixture Difficulty Swings")
-        st.info("🔄 Teams whose fixture difficulty will change significantly")
-        
-        if fixtures_df.empty or 'combined_fdr' not in fixtures_df.columns:
-            st.warning("No data available for fixture swings analysis")
-            return
-        
-        # Calculate fixture swings
-        swing_analysis = self._calculate_fixture_swings(fixtures_df)
-        
-        if swing_analysis.empty:
-            st.warning("Unable to calculate fixture swings")
-            return
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("📈 Fixtures Getting Easier")
-            improving = swing_analysis[swing_analysis['swing'] < -0.5].sort_values('swing').head(8)
-            
-            for _, row in improving.iterrows():
-                swing_val = abs(row['swing'])
-                st.write(f"🟢 **{row['team_short_name']}**: {swing_val:.2f} improvement")
-                st.caption(f"Early FDR: {row['early_fdr']:.2f} → Later FDR: {row['later_fdr']:.2f}")
-        
-        with col2:
-            st.subheader("📉 Fixtures Getting Harder")
-            worsening = swing_analysis[swing_analysis['swing'] > 0.5].sort_values('swing', ascending=False).head(8)
-            
-            for _, row in worsening.iterrows():
-                swing_val = row['swing']
-                st.write(f"🔴 **{row['team_short_name']}**: +{swing_val:.2f} difficulty")
-                st.caption(f"Early FDR: {row['early_fdr']:.2f} → Later FDR: {row['later_fdr']:.2f}")
-        
-        # Fixture swing visualization
-        if len(swing_analysis) > 0:
-            st.subheader("📊 Fixture Swing Visualization")
-            
-            fig = px.scatter(
-                swing_analysis,
-                x='early_fdr',
-                y='later_fdr',
-                hover_name='team_short_name',
-                color='swing',
-                color_continuous_scale='RdYlGn_r',
-                title="Fixture Difficulty: Early vs Later Fixtures"
-            )
-            
-            # Add diagonal line for reference
-            fig.add_shape(
-                type="line",
-                x0=1, y0=1, x1=5, y1=5,
-                line=dict(color="gray", dash="dash"),
-            )
-            
-            fig.update_layout(
-                xaxis_title="Early Fixtures FDR (GW 1-2)",
-                yaxis_title="Later Fixtures FDR (GW 3-5)"
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            st.markdown("""
-            **💡 How to read this chart:**
-            - **Below the line**: Fixtures get easier (good for transfers in)
-            - **Above the line**: Fixtures get harder (consider transfers out)
-            - **Green dots**: Significant improvement in fixtures
-            - **Red dots**: Significant worsening in fixtures
-            """)
+        # Reset team button
+        if st.button("🔄 Load Different Team"):
+            st.session_state.my_team_loaded = False
+            st.rerun()
 
-    def _create_enhanced_fdr_heatmap(self, fixtures_df, fdr_type):
-        """Create enhanced FDR heatmap with opponent information"""
-        
-        # Create pivot table with FDR values
-        pivot_data = fixtures_df.pivot_table(
-            index='team_short_name',
-            columns='fixture_number', 
-            values=f'{fdr_type}_fdr',
-            aggfunc='first'
-        )
-        
-        # Create hover text with opponent info
-        hover_text = fixtures_df.pivot_table(
-            index='team_short_name',
-            columns='fixture_number',
-            values='opponent_short_name',
-            aggfunc='first'
-        )
-        
-        # Create custom hover template
-        hovertemplate = '<b>%{y}</b><br>Fixture %{x}<br>FDR: %{z}<br>vs %{text}<extra></extra>'
-        
-        fig = go.Figure(data=go.Heatmap(
-            z=pivot_data.values,
-            x=[f'GW{i}' for i in pivot_data.columns],
-            y=pivot_data.index,
-            text=hover_text.values,
-            colorscale=[
-                [0.0, '#00FF87'], [0.25, '#01FF70'], 
-                [0.5, '#FFDC00'], [0.75, '#FF851B'], [1.0, '#FF4136']
-            ],
-            zmin=1, zmax=5,
-            hovertemplate=hovertemplate,
-            colorbar=dict(
-                title="FDR",
-                tickvals=[1, 2, 3, 4, 5],
-                ticktext=["Very Easy", "Easy", "Average", "Hard", "Very Hard"]
-            )
-        ))
-        
-        fig.update_layout(
-            title=f'{fdr_type.title()} FDR - Next 5 Fixtures',
-            xaxis_title="Fixture Number",
-            yaxis_title="Team",
-            height=600
-        )
-        
-        return fig
-    
-    def _create_enhanced_team_summary(self, fixtures_df, sort_by, ascending_sort):
-        """Create enhanced team summary with additional insights"""
-        
-        if fixtures_df.empty:
-            return pd.DataFrame()
-        
-        # Group by team and calculate comprehensive metrics
-        fdr_cols = [col for col in ['attack_fdr', 'defense_fdr', 'combined_fdr'] if col in fixtures_df.columns]
-        
-        if not fdr_cols:
-            return pd.DataFrame()
-        
-        agg_dict = {col: ['mean', 'min', 'max'] for col in fdr_cols}
-        agg_dict['fixture_number'] = 'count'
-        
-        if 'opponent_short_name' in fixtures_df.columns:
-            agg_dict['opponent_short_name'] = lambda x: ' | '.join(x.head(3))
-        
-        team_summary = fixtures_df.groupby(['team_short_name']).agg(agg_dict).round(2).reset_index()
-        
-        # Flatten column names
-        new_columns = ['Team']
-        for col in team_summary.columns[1:]:
-            if isinstance(col, tuple):
-                if col[1] == 'mean':
-                    if col[0] == 'attack_fdr':
-                        new_columns.append('Attack FDR')
-                    elif col[0] == 'defense_fdr':
-                        new_columns.append('Defense FDR')
-                    elif col[0] == 'combined_fdr':
-                        new_columns.append('Combined FDR')
-                elif col[1] == 'min':
-                    new_columns.append(f'Best {col[0].replace("_fdr", "")}')
-                elif col[1] == 'max':
-                    new_columns.append(f'Worst {col[0].replace("_fdr", "")}')
-                elif col[1] == 'count':
-                    new_columns.append('Fixtures')
-                elif col[1] == '<lambda>':
-                    new_columns.append('Next 3 Opponents')
-                else:
-                    new_columns.append(f"{col[0]}_{col[1]}")
-            else:
-                new_columns.append(str(col))
-        
-        team_summary.columns = new_columns
-        
-        # Sort based on user selection
-        if sort_by == "Combined FDR" and "Combined FDR" in team_summary.columns:
-            team_summary = team_summary.sort_values('Combined FDR', ascending=ascending_sort)
-        elif sort_by == "Attack FDR" and "Attack FDR" in team_summary.columns:
-            team_summary = team_summary.sort_values('Attack FDR', ascending=ascending_sort)
-        elif sort_by == "Defense FDR" and "Defense FDR" in team_summary.columns:
-            team_summary = team_summary.sort_values('Defense FDR', ascending=ascending_sort)
-        else:
-            team_summary = team_summary.sort_values('Team', ascending=True)
-        
-        return team_summary
-    
-    def _identify_attack_opportunities(self, fixtures_df, threshold):
-        """Identify attack opportunities by fixture timing"""
-        
-        opportunities = {'immediate': [], 'medium_term': [], 'avoid': []}
-        
-        if 'attack_fdr' not in fixtures_df.columns:
-            return opportunities
-        
-        # Immediate opportunities (next 2 fixtures)
-        immediate = fixtures_df[fixtures_df['fixture_number'] <= 2].groupby('team_short_name')['attack_fdr'].mean()
-        opportunities['immediate'] = [(team, fdr) for team, fdr in immediate.items() if fdr <= threshold][:5]
-        
-        # Medium-term opportunities (fixtures 3-5)
-        medium_term = fixtures_df[fixtures_df['fixture_number'] >= 3].groupby('team_short_name')['attack_fdr'].mean()
-        opportunities['medium_term'] = [(team, fdr) for team, fdr in medium_term.items() if fdr <= threshold][:5]
-        
-        # Teams to avoid
-        avoid = fixtures_df.groupby('team_short_name')['attack_fdr'].mean()
-        opportunities['avoid'] = [(team, fdr) for team, fdr in avoid.items() if fdr >= 4.0][:5]
-        
-        return opportunities
-    
-    def _calculate_clean_sheet_probabilities(self, fixtures_df):
-        """Calculate clean sheet probabilities based on defense FDR"""
-        
-        if 'defense_fdr' not in fixtures_df.columns:
-            return pd.DataFrame()
-        
-        team_defense = fixtures_df.groupby('team_short_name')['defense_fdr'].mean().reset_index()
-        
-        # Convert FDR to probability (simplified model)
-        team_defense['clean_sheet_prob'] = 100 * (6 - team_defense['defense_fdr']) / 5
-        team_defense['clean_sheet_prob'] = team_defense['clean_sheet_prob'].clip(0, 100)
-        
-        return team_defense.sort_values('clean_sheet_prob', ascending=False)
-    
-    def _create_transfer_recommendations(self, fixtures_df, players_df, threshold):
-        """Create detailed transfer recommendations"""
-        
-        recommendations = {}
-        
-        if 'team_short_name' not in players_df.columns:
-            return recommendations
-        
-        # Calculate team FDR averages
-        team_fdr = fixtures_df.groupby('team_short_name')['combined_fdr'].mean()
-        
-        # Merge with player data
-        players_with_fdr = players_df.merge(
-            team_fdr.reset_index(),
-            left_on='team_short_name',
-            right_on='team_short_name',
-            how='left'
-        )
-        
-        # Create recommendations by position
-        for position in ['Forward', 'Midfielder', 'Defender', 'Goalkeeper']:
-            pos_players = players_with_fdr[players_with_fdr['position_name'] == position]
+    def _load_fpl_team(self, team_id):
+        """Load a user's FPL team data from the FPL API."""
+        try:
+            url = f"{self.base_url}/entry/{team_id}/"
+            response = requests.get(url, timeout=10, verify=False)
+            response.raise_for_status()
+            entry_data = response.json()
+
+            # Fetch current gameweek picks
+            current_gameweek = entry_data.get('current_event')
+            if current_gameweek:
+                picks_url = f"{self.base_url}/entry/{team_id}/event/{current_gameweek}/picks/"
+                picks_response = requests.get(picks_url, timeout=10, verify=False)
+                picks_response.raise_for_status()
+                picks_data = picks_response.json()
+                entry_data['picks'] = picks_data.get('picks', [])
+
+            # Fetch chip usage
+            chips_url = f"{self.base_url}/entry/{team_id}/history/"
+            chips_response = requests.get(chips_url, timeout=10, verify=False)
+            chips_response.raise_for_status()
+            history_data = chips_response.json()
+            entry_data['chips'] = history_data.get('chips', [])
             
-            if not pos_players.empty:
-                # Target players (good fixtures, good stats)
-                targets = pos_players[
-                    (pos_players['combined_fdr'] <= threshold) &
-                    (pos_players['total_points'] >= pos_players['total_points'].quantile(0.6))
-                ].nlargest(5, 'points_per_million')
-                
-                recommendations[f'{position.lower()}_targets'] = [
-                    {
-                        'name': row['web_name'],
-                        'team': row['team_short_name'],
-                        'price': row['cost_millions'],
-                        'points': row['total_points'],
-                        'form': row.get('form', 0),
-                        'avg_fdr': row['combined_fdr'],
-                        'ownership': row.get('selected_by_percent', 0),
-                        'points_per_million': row['points_per_million']
-                    }
-                    for _, row in targets.iterrows()
-                ]
-        
-        # Players to avoid (difficult fixtures)
-        avoid_players = players_with_fdr[
-            players_with_fdr['combined_fdr'] >= 4.0
-        ].nlargest(10, 'combined_fdr')
-        
-        recommendations['avoid_players'] = [
-            {
-                'name': row['web_name'],
-                'team': row['team_short_name'],
-                'avg_fdr': row['combined_fdr']
-            }
-            for _, row in avoid_players.iterrows()
-        ]
-        
-        # Differential picks (low ownership, good fixtures)
-        differentials = players_with_fdr[
-            (players_with_fdr['combined_fdr'] <= threshold) &
-            (players_with_fdr['selected_by_percent'] <= 10) &
-            (players_with_fdr['total_points'] >= 50)
-        ].nlargest(8, 'points_per_million')
-        
-        recommendations['differentials'] = [
-            {
-                'name': row['web_name'],
-                'team': row['team_short_name'],
-                'price': row['cost_millions'],
-                'points': row['total_points'],
-                'avg_fdr': row['combined_fdr'],
-                'ownership': row['selected_by_percent']
-            }
-            for _, row in differentials.iterrows()
-        ]
-        
-        return recommendations
-    
-    def _calculate_fixture_swings(self, fixtures_df):
-        """Calculate fixture difficulty swings between early and later fixtures"""
-        
-        if 'combined_fdr' not in fixtures_df.columns:
-            return pd.DataFrame()
-        
-        # Split fixtures into early (1-2) and later (3-5)
-        early_fixtures = fixtures_df[fixtures_df['fixture_number'] <= 2].groupby('team_short_name')['combined_fdr'].mean()
-        later_fixtures = fixtures_df[fixtures_df['fixture_number'] >= 3].groupby('team_short_name')['combined_fdr'].mean()
-        
-        # Calculate swing (positive = getting harder, negative = getting easier)
-        swing_data = []
-        
-        for team in early_fixtures.index:
-            if team in later_fixtures.index:
-                early_fdr = early_fixtures[team]
-                later_fdr = later_fixtures[team]
-                swing = later_fdr - early_fdr
-                
-                swing_data.append({
-                    'team_short_name': team,
-                    'early_fdr': early_fdr,
-                    'later_fdr': later_fdr,
-                    'swing': swing
-                })
-        
-        return pd.DataFrame(swing_data)
+            st.session_state.my_team_loaded = True
+            return entry_data
+        except requests.RequestException as e:
+            st.error(f"Failed to load team data for ID {team_id}: {e}")
+            return None
 
     def run(self):
         """Main application runner"""
@@ -1370,7 +910,7 @@ class FPLAnalyticsApp:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("📊 Total Players", len(df))
+            st.metric("👥 Total Players", len(df))
         with col2:
             avg_price = df['cost_millions'].mean()
             st.metric("💰 Avg Price", f"£{avg_price:.1f}m")
@@ -1393,7 +933,6 @@ class FPLAnalyticsApp:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("📊 Players by Position")
             if 'position_name' in df.columns:
                 position_counts = df['position_name'].value_counts()
                 fig = px.pie(
@@ -1427,7 +966,7 @@ class FPLAnalyticsApp:
         
         with tab1:
             if len(df) > 0:
-                display_cols = ['web_name', 'total_points', 'cost_millions']
+                display_cols = ['web_name', 'total_points']
                 if 'team_short_name' in df.columns:
                     display_cols.insert(1, 'team_short_name')
                 if 'position_name' in df.columns:
@@ -1440,29 +979,49 @@ class FPLAnalyticsApp:
         
         with tab2:
             if len(df) > 0 and 'points_per_million' in df.columns:
-                display_cols = ['web_name', 'total_points', 'cost_millions', 'points_per_million']
-                if 'team_short_name' in df.columns:
-                    display_cols.insert(1, 'team_short_name')
-                if 'position_name' in df.columns:
-                    display_cols.insert(-2, 'position_name')
+                # Enhanced Best Value: Filter for players with significant minutes
+                minutes_column = 'minutes' if 'minutes' in df.columns else 'total_points'
                 
-                best_value = df[df['total_points'] > 50].nlargest(10, 'points_per_million')[display_cols]
-                st.dataframe(best_value, use_container_width=True)
+                # Use a more robust filter for value players
+                value_df = df[df[minutes_column] > 0].nlargest(15, 'points_per_million')
+
+                st.dataframe(
+                    value_df[['web_name', 'team_short_name', 'position_name', 'cost_millions', 'total_points', 'points_per_million', 'form', 'selected_by_percent']],
+                    column_config={
+                        "web_name": "Player",
+                        "team_short_name": "Team",
+                        "position_name": "Pos",
+                        "cost_millions": "Cost (£m)",
+                        "total_points": "P",
+                        "points_per_million": "PPM",
+                        "form": "Form",
+                        "selected_by_percent": "Own %"
+                    },
+                    use_container_width=True
+                )
             else:
-                st.warning("Points per million data not available")
+                st.warning("Best value data not available.")
         
         with tab3:
             if len(df) > 0 and 'form' in df.columns:
-                display_cols = ['web_name', 'form', 'total_points', 'cost_millions']
-                if 'team_short_name' in df.columns:
-                    display_cols.insert(1, 'team_short_name')
-                if 'position_name' in df.columns:
-                    display_cols.insert(-2, 'position_name')
-                
-                form_players = df[df['total_points'] > 30].nlargest(10, 'form')[display_cols]
-                st.dataframe(form_players, use_container_width=True)
+                # Enhanced Form Players: Add ownership and PPM
+                form_df = df.nlargest(15, 'form')
+                st.dataframe(
+                    form_df[['web_name', 'team_short_name', 'position_name', 'cost_millions', 'total_points', 'form', 'points_per_million', 'selected_by_percent']],
+                    column_config={
+                        "web_name": "Player",
+                        "team_short_name": "Team",
+                        "position_name": "Pos",
+                        "cost_millions": "Cost (£m)",
+                        "total_points": "P",
+                        "form": "Form",
+                        "points_per_million": "PPM",
+                        "selected_by_percent": "Own %"
+                    },
+                    use_container_width=True
+                )
             else:
-                st.warning("Form data not available")
+                st.warning("Form data not available.")
 
     def render_players(self):
         """Render player analysis page"""
@@ -1531,7 +1090,6 @@ class FPLAnalyticsApp:
                 (filtered_df['cost_millions'] <= max_price)
             ]
         
-        st.write(f"📊 Showing {len(filtered_df)} players")
         
         # Player table
         base_cols = ['web_name', 'total_points']
@@ -1554,7 +1112,6 @@ class FPLAnalyticsApp:
 
     def render_teams(self):
         """Enhanced Team Analysis and Comparison"""
-        st.header("📊 Team Analysis & Comparison")
         
         if not st.session_state.data_loaded:
             st.info("Please load data first from the Dashboard.")
@@ -1630,7 +1187,7 @@ class FPLAnalyticsApp:
             )
             
             # Team insights
-            st.subheader("� Team Insights")
+            st.subheader("💡 Team Insights")
             
             col1, col2 = st.columns(2)
             
@@ -1678,7 +1235,6 @@ class FPLAnalyticsApp:
             team2_players = players_df[players_df['team'] == team2_id]
             
             # Comparison metrics
-            st.subheader(f"�📊 {team1} vs {team2}")
             
             col1, col2, col3 = st.columns(3)
             
@@ -1736,7 +1292,7 @@ class FPLAnalyticsApp:
         st.subheader("📈 Performance Trends")
         
         # This would typically involve historical data
-        st.info("� Performance trends analysis coming soon! This will include:")
+        st.info("🚧 Performance trends analysis coming soon! This will include:")
         st.write("• Weekly point trends")
         st.write("• Form progression")
         st.write("• Player rotation patterns")
@@ -1799,306 +1355,6 @@ class FPLAnalyticsApp:
                     else:
                         st.success("✅ No obvious players to avoid!")
 
-    def render_my_team(self):
-        """Enhanced My FPL Team analysis and import"""
-        st.header("👤 My FPL Team")
-        
-        # Team import section
-        if 'my_team_loaded' not in st.session_state or not st.session_state.my_team_loaded:
-            st.subheader("📥 Import Your FPL Team")
-            
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                team_id = st.text_input(
-                    "Enter your FPL Team ID",
-                    placeholder="e.g., 123456",
-                    help="You can find your team ID in the URL when viewing your team on the FPL website"
-                )
-            
-            with col2:
-                if st.button("🔄 Load My Team", type="primary"):
-                    if team_id:
-                        with st.spinner("Loading your team..."):
-                            team_data = self._load_fpl_team(team_id)
-                            
-                            if team_data:
-                                st.session_state.my_team_data = team_data
-                                st.session_state.my_team_id = team_id
-                                st.session_state.my_team_loaded = True
-                                st.success("✅ Team loaded successfully!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Could not load team. Please check your team ID.")
-                    else:
-                        st.warning("Please enter a team ID")
-            
-            # Instructions
-            with st.expander("💡 How to find your Team ID", expanded=False):
-                st.markdown("""
-                1. Go to the [FPL website](https://fantasy.premierleague.com)
-                2. Log in and view your team
-                3. Look at the URL - it will be something like: `https://fantasy.premierleague.com/entry/123456/event/10`
-                4. Your Team ID is the number after `/entry/` (in this example: 123456)
-                """)
-            
-            return
-        
-        # Display loaded team
-        team_data = st.session_state.my_team_data
-        
-        # Team overview
-        st.subheader(f"🏆 {team_data.get('entry_name', 'Your Team')} (ID: {st.session_state.my_team_id})")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Overall Rank", f"{team_data.get('summary_overall_rank', 'N/A'):,}")
-        
-        with col2:
-            st.metric("Total Points", f"{team_data.get('summary_overall_points', 'N/A'):,}")
-        
-        with col3:
-            st.metric("Gameweek Rank", f"{team_data.get('summary_event_rank', 'N/A'):,}")
-        
-        with col4:
-            st.metric("Team Value", f"£{team_data.get('value', 1000)/10:.1f}m")
-        
-        # Team analysis tabs
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "👥 Current Squad", 
-            "📊 Performance", 
-            "🔄 Transfer Suggestions", 
-            "📈 Benchmarking"
-        ])
-        
-        with tab1:
-            self._display_current_squad(team_data)
-        
-        with tab2:
-            self._display_performance_analysis(team_data)
-        
-        with tab3:
-            self._display_transfer_suggestions(team_data)
-        
-        with tab4:
-            self._display_benchmarking(team_data)
-        
-        # Reset team button
-        if st.button("🔄 Load Different Team"):
-            st.session_state.my_team_loaded = False
-            st.rerun()
-    
-    def _load_fpl_team(self, team_id):
-        """Load FPL team data from API"""
-        try:
-            # FPL API endpoints
-            entry_url = f"https://fantasy.premierleague.com/api/entry/{team_id}/"
-            picks_url = f"https://fantasy.premierleague.com/api/entry/{team_id}/event/1/picks/"  # Latest gameweek
-            
-            # Load entry data
-            entry_response = requests.get(entry_url, timeout=10, verify=False)
-            entry_response.raise_for_status()
-            entry_data = entry_response.json()
-            
-            # Load picks data
-            try:
-                picks_response = requests.get(picks_url, timeout=10, verify=False)
-                picks_response.raise_for_status()
-                picks_data = picks_response.json()
-                entry_data['picks'] = picks_data.get('picks', [])
-            except:
-                entry_data['picks'] = []
-            
-            return entry_data
-            
-        except Exception as e:
-            st.error(f"Error loading team: {str(e)}")
-            return None
-    
-    def _display_current_squad(self, team_data):
-        """Display current squad with player details"""
-        st.subheader("� Current Squad")
-        
-        if not st.session_state.data_loaded:
-            st.warning("Load player data to see detailed squad analysis")
-            return
-        
-        picks = team_data.get('picks', [])
-        if not picks:
-            st.warning("No squad data available")
-            return
-        
-        players_df = st.session_state.players_df
-        
-        # Match picks with player data
-        squad_data = []
-        for pick in picks:
-            player_info = players_df[players_df['id'] == pick['element']]
-            if not player_info.empty:
-                player = player_info.iloc[0]
-                squad_data.append({
-                    'Player': player['web_name'],
-                    'Position': player.get('position_name', 'Unknown'),
-                    'Team': player.get('team_short_name', 'N/A'),
-                    'Price': f"£{player['cost_millions']:.1f}m",
-                    'Points': player['total_points'],
-                    'Form': player.get('form', 0),
-                    'Status': '👑 Captain' if pick.get('is_captain') else '🅒 Vice' if pick.get('is_vice_captain') else '🟢 Playing' if pick['position'] <= 11 else '🟡 Bench'
-                })
-        
-        if squad_data:
-            squad_df = pd.DataFrame(squad_data)
-            st.dataframe(squad_df, use_container_width=True, hide_index=True)
-            
-            # Squad statistics
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                total_value = sum([float(row['Price'].replace('£', '').replace('m', '')) for row in squad_data])
-                st.metric("Squad Value", f"£{total_value:.1f}m")
-            
-            with col2:
-                total_points = sum([row['Points'] for row in squad_data])
-                st.metric("Total Points", f"{total_points:,}")
-            
-            with col3:
-                avg_form = np.mean([row['Form'] for row in squad_data if row['Form'] > 0])
-                st.metric("Average Form", f"{avg_form:.1f}")
-    
-    def _display_performance_analysis(self, team_data):
-        """Display performance analysis"""
-        st.subheader("📊 Performance Analysis")
-        
-        # Basic performance metrics
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("**📈 Season Performance**")
-            st.write(f"• Overall Points: {team_data.get('summary_overall_points', 'N/A'):,}")
-            st.write(f"• Overall Rank: {team_data.get('summary_overall_rank', 'N/A'):,}")
-            st.write(f"• Highest Score: {team_data.get('highest_score', 'N/A')}")
-        
-        with col2:
-            st.write("**🎯 Recent Performance**")
-            st.write(f"• Gameweek Rank: {team_data.get('summary_event_rank', 'N/A'):,}")
-            st.write(f"• Gameweek Points: {team_data.get('summary_event_points', 'N/A')}")
-            st.write(f"• Form: {team_data.get('current_event', 'N/A')}")
-        
-        # Performance insights
-        st.write("**💡 Performance Insights**")
-        
-        overall_rank = team_data.get('summary_overall_rank', 0)
-        if overall_rank:
-            if overall_rank <= 100000:
-                st.success("🏆 Excellent performance! You're in the top tier of managers.")
-            elif overall_rank <= 500000:
-                st.info("👍 Good performance! You're above average.")
-            else:
-                st.warning("📈 Room for improvement. Consider the transfer suggestions!")
-    
-    def _display_transfer_suggestions(self, team_data):
-        """Display transfer suggestions based on current squad"""
-        st.subheader("🔄 Transfer Suggestions")
-        
-        if not st.session_state.data_loaded:
-            st.warning("Load player data to see transfer suggestions")
-            return
-        
-        # Analyze current squad for weaknesses
-        picks = team_data.get('picks', [])
-        if not picks:
-            st.warning("No squad data available for analysis")
-            return
-        
-        players_df = st.session_state.players_df
-        current_players = [pick['element'] for pick in picks]
-        
-        # Find players in poor form
-        poor_form_players = []
-        for pick in picks:
-            player_info = players_df[players_df['id'] == pick['element']]
-            if not player_info.empty:
-                player = player_info.iloc[0]
-                if player.get('form', 0) < 4.0 and player['total_points'] > 20:
-                    poor_form_players.append({
-                        'name': player['web_name'],
-                        'form': player.get('form', 0),
-                        'position': player.get('position_name', 'Unknown')
-                    })
-        
-        # Suggest alternatives
-        st.write("**⚠️ Players to Consider Transferring Out**")
-        if poor_form_players:
-            for player in poor_form_players[:3]:
-                st.warning(f"• {player['name']} - Poor form ({player['form']:.1f})")
-        else:
-            st.success("✅ No obvious transfer candidates - your team is in good form!")
-        
-        # Suggest transfer targets
-        st.write("**🎯 Suggested Transfer Targets**")
-        
-        # Find good value players not in current squad
-        available_players = players_df[~players_df['id'].isin(current_players)]
-        
-        if not available_players.empty and 'points_per_million' in available_players.columns:
-            targets = available_players[
-                (available_players['total_points'] > 30) &
-                (available_players.get('form', 0) >= 6.0) &
-                (available_players['cost_millions'] <= 10.0)
-            ].nlargest(5, 'points_per_million')
-            
-            for _, player in targets.iterrows():
-                st.success(f"• {player['web_name']} ({player.get('position_name', 'Unknown')}) - "
-                          f"£{player['cost_millions']:.1f}m - Form: {player.get('form', 0):.1f}")
-    
-    def _display_benchmarking(self, team_data):
-        """Display benchmarking against top teams"""
-        st.subheader("� Benchmarking")
-        
-        overall_rank = team_data.get('summary_overall_rank', 0)
-        total_players = 8000000  # Approximate number of FPL players
-        
-        if overall_rank:
-            percentile = (1 - (overall_rank / total_players)) * 100
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.metric("Your Percentile", f"{percentile:.1f}%")
-                
-                if percentile >= 90:
-                    st.success("🏆 Elite manager!")
-                elif percentile >= 70:
-                    st.info("👍 Above average")
-                elif percentile >= 50:
-                    st.warning("📊 Average performance")
-                else:
-                    st.error("📈 Below average")
-            
-            with col2:
-                # Performance band
-                if overall_rank <= 10000:
-                    st.success("🥇 Top 10k - Elite")
-                elif overall_rank <= 100000:
-                    st.info("🥈 Top 100k - Excellent")
-                elif overall_rank <= 1000000:
-                    st.warning("🥉 Top 1M - Good")
-                else:
-                    st.error("📈 Outside Top 1M")
-        
-        # Improvement suggestions
-        st.write("**💡 Areas for Improvement**")
-        
-        gameweek_rank = team_data.get('summary_event_rank', 0)
-        if gameweek_rank and overall_rank:
-            if gameweek_rank < overall_rank * 0.5:
-                st.success("✅ Recent performance is improving!")
-            elif gameweek_rank > overall_rank * 2:
-                st.warning("⚠️ Recent performance needs attention")
-            else:
-                st.info("📊 Consistent performance")
-
     def render_ai_recommendations(self):
         """Enhanced AI-powered recommendations"""
         st.header("🤖 AI-Powered Recommendations")
@@ -2150,7 +1406,6 @@ class FPLAnalyticsApp:
                                     
                                     with col1:
                                         st.write(f"💰 **Price**: £{player['price']:.1f}m")
-                                        st.write(f"📊 **Points**: {player['points']}")
                                         st.write(f"🔥 **Form**: {player['form']:.1f}")
                                     
                                     with col2:
@@ -2159,22 +1414,164 @@ class FPLAnalyticsApp:
                                         st.write(f"🤖 **AI Score**: {player['ai_score']:.1f}")
                 
         with tab2:
-            st.subheader("📈 Form Analysis")
+            st.subheader("📈 Enhanced Form Analysis")
             
-            # Form-based recommendations
+            # Form-based recommendations with enhanced insights
             form_analysis = self._analyze_player_form(df)
             
-            col1, col2 = st.columns(2)
+            # Display form statistics overview
+            if form_analysis.get('form_stats'):
+                stats = form_analysis['form_stats']
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Average Form", f"{stats['avg_form']:.2f}")
+                with col2:
+                    st.metric("Hot Form Players", stats['high_form_count'])
+                with col3:
+                    st.metric("Cold Form Players", stats['low_form_count'])
+                with col4:
+                    st.metric("Form Volatility", f"{stats['form_volatility']:.2f}")
+                
+                st.divider()
             
-            with col1:
-                st.write("**🔥 Hot Form Players (Rising)**")
-                for player in form_analysis['hot_form'][:5]:
-                    st.write(f"• **{player['name']}** ({player['team']}) - Form: {player['form']:.1f}")
+            # Enhanced form tabs
+            form_tab1, form_tab2, form_tab3 = st.tabs([
+                "🔥 Hot Form Players", 
+                "❄️ Cold Form Players", 
+                "📈 Form Trends"
+            ])
             
-            with col2:
-                st.write("**❄️ Cold Form Players (Falling)**")
-                for player in form_analysis['cold_form'][:5]:
-                    st.write(f"• **{player['name']}** ({player['team']}) - Form: {player['form']:.1f}")
+            with form_tab1:
+                st.write("**🔥 Players in Excellent Form (6.0+ Rating)**")
+                
+                if form_analysis.get('hot_form'):
+                    for i, player in enumerate(form_analysis['hot_form'][:8], 1):
+                        with st.expander(f"#{i} {player['name']} ({player['team']}) - Form: {player['form']:.1f}"):
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                st.write(f"• Form: {player['form']:.1f}")
+                                st.write(f"• Total Points: {player['total_points']}")
+                                st.write(f"• Position: {player['position']}")
+                                st.write(f"• Minutes: {player['minutes']}")
+                            
+                            with col2:
+                                st.write("**💰 Value Analysis**")
+                                st.write(f"• Price: £{player['price']:.1f}m")
+                                st.write(f"• Value Score: {player['value_score']:.1f}")
+                                st.write(f"• Ownership: {player['ownership']:.1f}%")
+                                
+                                # Ownership category
+                                if player['ownership'] < 5:
+                                    st.write("• 💎 **Differential**")
+                                elif player['ownership'] < 15:
+                                    st.write("• 🎯 **Rising Star**")
+                                elif player['ownership'] < 30:
+                                    st.write("• 👥 **Popular Pick**")
+                                else:
+                                    st.write("• 🔥 **Template Player**")
+                            
+                            with col3:
+                                st.write("**💡 FPL Recommendation**")
+                                st.info(player['recommendation'])
+                                
+                                # Transfer urgency
+                                if player['form'] >= 8.0 and player['ownership'] < 15:
+                                    st.success("🚨 **URGENT**: Transfer in before price rise!")
+                                elif player['form'] >= 7.0:
+                                    st.success("⏰ **HIGH PRIORITY**: Consider this week")
+                                else:
+                                    st.info("👀 **MONITOR**: Keep watching")
+                else:
+                    st.info("No players currently meet the hot form criteria")
+            
+            with form_tab2:
+                st.write("**❄️ Players in Poor Form (4.0- Rating)**")
+                
+                if form_analysis.get('cold_form'):
+                    for i, player in enumerate(form_analysis['cold_form'][:8], 1):
+                        with st.expander(f"#{i} {player['name']} ({player['team']}) - Form: {player['form']:.1f}"):
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                st.write("**📉 Poor Performance**")
+                                st.write(f"• Form: {player['form']:.1f}")
+                                st.write(f"• Total Points: {player['total_points']}")
+                                st.write(f"• Position: {player['position']}")
+                                st.write(f"• Minutes: {player['minutes']}")
+                            
+                            with col2:
+                                st.write("**💸 Value Concern**")
+                                st.write(f"• Price: £{player['price']:.1f}m")
+                                st.write(f"• Value Score: {player['value_score']:.1f}")
+                                st.write(f"• Ownership: {player['ownership']:.1f}%")
+                                
+                                # Risk assessment
+                                if player['price'] >= 10:
+                                    st.write("• ⚠️ **Premium Risk**")
+                                elif player['ownership'] >= 30:
+                                    st.write("• 🚨 **Template Trap**")
+                                else:
+                                    st.write("• 📉 **Underperformer**")
+                            
+                            with col3:
+                                st.write("**⚠️ Transfer Advice**")
+                                st.warning(player['recommendation'])
+                                
+                                # Transfer urgency for selling
+                                if player['form'] <= 2.0 and player['price'] >= 8:
+                                    st.error("🚨 **URGENT**: Transfer out immediately!")
+                                elif player['form'] <= 3.0:
+                                    st.warning("⏰ **HIGH PRIORITY**: Plan transfer out")
+                                else:
+                                    st.info("👀 **MONITOR**: Watch for improvement")
+                else:
+                    st.info("No players currently meet the cold form criteria")
+            
+            with form_tab3:
+                st.write("**📈 Significant Form Trends & Pattern Analysis**")
+                
+                if form_analysis.get('form_trends'):
+                    for trend in form_analysis['form_trends'][:10]:
+                        if trend['trend'] == "📈 Hot Streak":
+                            st.success(f"**{trend['name']}** ({trend['team']}) - {trend['trend']}")
+                        elif trend['trend'] == "📉 Poor Patch":
+                            st.error(f"**{trend['name']}** ({trend['team']}) - {trend['trend']}")
+                        else:
+                            st.info(f"**{trend['name']}** ({trend['team']}) - {trend['trend']}")
+                        
+                        st.caption(f"Current: {trend['form']:.1f} | Season Avg: {trend['season_avg']:.1f} | £{trend['price']:.1f}m | {trend['ownership']:.1f}% owned")
+                        st.divider()
+                else:
+                    st.info("No significant form trends detected")
+            
+            # Form-based actionable insights
+            st.subheader("💡 This Week's Form-Based Actions")
+            
+            action_col1, action_col2 = st.columns(2)
+            
+            with action_col1:
+                st.write("**🎯 Immediate Transfer Targets**")
+                urgent_targets = [p for p in form_analysis.get('hot_form', [])[:5] 
+                                if p['form'] >= 7.5 and p['ownership'] < 20]
+                
+                if urgent_targets:
+                    for player in urgent_targets[:3]:
+                        st.success(f"✅ **{player['name']}** - {player['form']:.1f} form, {player['ownership']:.1f}% owned")
+                else:
+                    st.info("No urgent targets identified")
+            
+            with action_col2:
+                st.write("**⚠️ Consider Transferring Out**")
+                urgent_sells = [p for p in form_analysis.get('cold_form', [])[:5] 
+                              if p['form'] <= 3.0 and p['price'] >= 7]
+                
+                if urgent_sells:
+                    for player in urgent_sells[:3]:
+                        st.warning(f"❌ **{player['name']}** - {player['form']:.1f} form, £{player['price']:.1f}m")
+                else:
+                    st.success("No urgent transfers out needed")
         
         with tab3:
             st.subheader("💰 Value Picks")
@@ -2208,131 +1605,6 @@ class FPLAnalyticsApp:
                 for advice in transfer_advice['sells'][:5]:
                     st.warning(f"**{advice['player']}** - {advice['reason']}")
     
-    def _generate_ai_targets(self, df, price_range, positions, min_form, max_ownership):
-        """Generate AI-powered player targets"""
-        targets = {}
-        
-        # Position mapping
-        position_map = {
-            "Goalkeeper": 1, "Defender": 2, "Midfielder": 3, "Forward": 4
-        }
-        
-        for position in positions:
-            position_id = position_map.get(position)
-            if position_id is None:
-                continue
-            
-            # Filter players
-            filtered = df[
-                (df['element_type'] == position_id) &
-                (df['cost_millions'] >= price_range[0]) &
-                (df['cost_millions'] <= price_range[1]) &
-                (df.get('form', 0) >= min_form) &
-                (df.get('selected_by_percent', 0) <= max_ownership) &
-                (df['total_points'] > 10)  # Minimum threshold
-            ].copy()
-            
-            if not filtered.empty:
-                # Calculate AI score
-                filtered['ai_score'] = (
-                    filtered.get('form', 0) * 0.3 +
-                    filtered.get('points_per_million', 0) * 0.4 +
-                    (100 - filtered.get('selected_by_percent', 50)) / 100 * 0.2 +
-                    filtered['total_points'] / filtered['total_points'].max() * 100 * 0.1
-                )
-                
-                # Sort by AI score
-                filtered = filtered.nlargest(5, 'ai_score')
-                
-                targets[position] = [
-                    {
-                        'name': row['web_name'],
-                        'team': row.get('team_short_name', 'N/A'),
-                        'price': row['cost_millions'],
-                        'points': row['total_points'],
-                        'form': row.get('form', 0),
-                        'ownership': row.get('selected_by_percent', 0),
-                        'value': row.get('points_per_million', 0),
-                        'ai_score': row['ai_score']
-                    }
-                    for _, row in filtered.iterrows()
-                ]
-        
-        return targets
-    
-    def _analyze_player_form(self, df):
-        """Analyze player form trends"""
-        if 'form' not in df.columns:
-            return {'hot_form': [], 'cold_form': []}
-        
-        # Players with good recent form
-        hot_form = df[
-            (df['form'] >= 7.0) & 
-            (df['total_points'] > 30)
-        ].nlargest(10, 'form')
-        
-        # Players with poor recent form
-        cold_form = df[
-            (df['form'] <= 3.0) & 
-            (df['total_points'] > 50)  # Only established players
-        ].nsmallest(10, 'form')
-        
-        return {
-            'hot_form': [
-                {
-                    'name': row['web_name'],
-                    'team': row.get('team_short_name', 'N/A'),
-                    'form': row['form']
-                }
-                for _, row in hot_form.iterrows()
-            ],
-            'cold_form': [
-                {
-                    'name': row['web_name'],
-                    'team': row.get('team_short_name', 'N/A'),
-                    'form': row['form']
-                }
-                for _, row in cold_form.iterrows()
-            ]
-        }
-    
-    def _generate_transfer_advice(self, df):
-        """Generate AI transfer advice"""
-        targets = []
-        sells = []
-        
-        # Target players: High form, good value, reasonable ownership
-        if 'form' in df.columns and 'points_per_million' in df.columns:
-            potential_targets = df[
-                (df['form'] >= 6.0) &
-                (df['points_per_million'] >= 8.0) &
-                (df.get('selected_by_percent', 0) <= 30.0) &
-                (df['total_points'] > 25)
-            ].head(5)
-            
-            for _, player in potential_targets.iterrows():
-                targets.append({
-                    'player': f"{player['web_name']} (£{player['cost_millions']:.1f}m)",
-                    'reason': f"Excellent form ({player['form']:.1f}) and great value ({player['points_per_million']:.1f} pts/£m)"
-                })
-        
-        # Sell candidates: Poor form, high ownership established players
-        if 'form' in df.columns:
-            potential_sells = df[
-                (df['form'] <= 4.0) &
-                (df.get('selected_by_percent', 0) >= 15.0) &
-                (df['total_points'] > 50) &
-                (df['cost_millions'] >= 7.0)
-            ].head(5)
-            
-            for _, player in potential_sells.iterrows():
-                sells.append({
-                    'player': f"{player['web_name']} (£{player['cost_millions']:.1f}m)",
-                    'reason': f"Poor recent form ({player['form']:.1f}) despite high ownership"
-                })
-        
-        return {'targets': targets, 'sells': sells}
-
     def render_team_builder(self):
         """Enhanced Team Builder with comprehensive recommendations"""
         st.header("⚽ Enhanced Team Builder")
@@ -2395,7 +1667,7 @@ class FPLAnalyticsApp:
                 preferred_style = st.selectbox("Playing Style", ["balanced", "attacking", "defensive"])
         
         # Generate team button
-        if st.button("� Generate Optimized Team", type="primary"):
+        if st.button("⚡ Generate Optimized Team", type="primary"):
             try:
                 from components.team_recommender import get_latest_team_recommendations
                 
@@ -2410,7 +1682,7 @@ class FPLAnalyticsApp:
                 with st.spinner("Optimizing your team..."):
                     recommendations = get_latest_team_recommendations(
                         df, 
-                        budget=budget,
+                        budget=int(budget),
                         formations=formations,
                         max_players_per_club=max_players_per_team,
                         min_ownership=min_ownership,
@@ -2460,7 +1732,13 @@ class FPLAnalyticsApp:
             1: 'GK', 2: 'DEF', 3: 'MID', 4: 'FWD'
         })
         display_df['Cost'] = '£' + (display_df['now_cost'] / 10).round(1).astype(str) + 'm'
-        display_df['Status'] = display_df.get('is_starting', [True]*len(display_df)).apply(
+        
+        # Handle is_starting column safely - create default values if it doesn't exist
+        if 'is_starting' not in display_df.columns:
+            # Assume first 11 players are starting (based on typical FPL setup)
+            display_df['is_starting'] = display_df.index < 11
+        
+        display_df['Status'] = display_df['is_starting'].apply(
             lambda x: '🟢 Starting' if x else '🟡 Bench'
         )
         
@@ -2495,7 +1773,6 @@ class FPLAnalyticsApp:
             "🏆 League Odds", 
             "⚽ Match Odds", 
             "🎯 Player Odds", 
-            "📊 Value Bets", 
             "🔮 Predictions"
         ])
         
@@ -2581,17 +1858,17 @@ class FPLAnalyticsApp:
                 st.write("**🎯 Best Value Teams**")
                 for insight in team_insights['value_teams'][:3]:
                     st.success(f"• **{insight['team']}** - {insight['reason']}")
-            
+
             with col2:
                 st.write("**⚠️ Overpriced Teams**")
                 for insight in team_insights['overpriced_teams'][:3]:
-                    st.warning(f"• **{insight['team']}** - {insight['reason']}")
-            
+                    st.warning(f"⚠️ **{insight['team']}** - {insight['reason']}")
+
             with col3:
                 st.write("**💎 Differential Teams**")
                 for insight in team_insights['differential_teams'][:3]:
                     st.info(f"• **{insight['team']}** - {insight['reason']}")
-    
+
     def _render_match_odds(self):
         """Render upcoming match odds and predictions"""
         st.subheader("⚽ Match Odds & FPL Impact")
@@ -2606,7 +1883,6 @@ class FPLAnalyticsApp:
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    st.write("**📊 Match Odds**")
                     st.write(f"Home Win: {match['home_odds']}")
                     st.write(f"Draw: {match['draw_odds']}")
                     st.write(f"Away Win: {match['away_odds']}")
@@ -2760,7 +2036,6 @@ class FPLAnalyticsApp:
     
     def _render_value_bets(self):
         """Identify value betting opportunities related to FPL"""
-        st.subheader("📊 Value Betting & FPL Arbitrage")
         
         st.info("💡 **Value Betting Concept**: When bookmaker odds suggest a lower probability than your analysis indicates")
         
@@ -2779,25 +2054,12 @@ class FPLAnalyticsApp:
                 
                 # Identify undervalued players based on form vs ownership
                 value_players = self._identify_value_players(players_df)
-                
-                for player in value_players[:5]:
-                    with st.expander(f"💎 {player['name']} - Value Opportunity"):
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.write("**📊 Player Stats**")
-                            st.write(f"• Form: {player['form']:.1f}")
-                            st.write(f"• Points: {player['points']}")
-                            st.write(f"• Price: £{player['price']:.1f}m")
-                            st.write(f"• Ownership: {player['ownership']:.1f}%")
-                        
-                        with col2:
-                            st.write("**🎯 Value Analysis**")
-                            st.write(f"• Expected vs Actual: {player['value_score']:.2f}")
-                            st.write(f"• Market Inefficiency: {player['inefficiency']}")
-                            st.write(f"• FPL Strategy: {player['strategy']}")
-                            
-                        st.success(f"**Recommendation**: {player['recommendation']}")
+                if value_players:
+                    st.write("**💎 Top 5 Value Player Bets**")
+                    for player in value_players[:5]:
+                        with st.expander(f"💎 {player['name']} (£{player['price']:.1f}m) - Value: {player['value_score']:.1f}"):
+                            st.write(f"**{player['recommendation']}**")
+                            st.write(f"Form: {player['form']:.1f} | Ownership: {player['ownership']:.1f}% | Points: {player['points']}")
         
         with value_tab2:
             st.write("**🏆 Team Performance Value Bets**")
@@ -2890,7 +2152,7 @@ class FPLAnalyticsApp:
                 for pred in gw_predictions['avoid'][:3]:
                     st.write(f"🔴 **{pred['player']}**")
                     st.caption(f"Risk: {pred['risk_reason']}")
-        
+
         with pred_tab2:
             st.write("**📅 Next 5 Gameweeks Strategy**")
             
@@ -3083,8 +2345,7 @@ class FPLAnalyticsApp:
                 'strategy': 'Differential pick' if ownership < 5 else 'Template avoid',
                 'recommendation': f'Strong differential option with {form:.1f} form and only {ownership:.1f}% ownership'
             })
-        
-        return sorted(value_players, key=lambda x: x['value_score'], reverse=True)
+        return value_players
     
     def _analyze_team_values(self):
         """Analyze team values for betting opportunities"""
@@ -3174,6 +2435,838 @@ class FPLAnalyticsApp:
                 {'player': 'Son', 'team': 'Tottenham', 'projected_total': 205},
                 {'player': 'Palmer', 'team': 'Chelsea', 'projected_total': 195}
             ]
+        }
+
+    def _render_fdr_overview(self, fixtures_df, fdr_visualizer, gameweeks_ahead, sort_by, ascending_sort, analysis_type="Combined"):
+        """Enhanced FDR overview with better metrics and insights"""
+        
+        if fixtures_df.empty:
+            st.warning("No fixture data available")
+            return
+        
+        # Key metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            total_fixtures = len(fixtures_df)
+            teams_count = fixtures_df['team_short_name'].nunique()
+        
+        with col2:
+            if 'attack_fdr' in fixtures_df.columns:
+                avg_attack_fdr = fixtures_df['attack_fdr'].mean()
+                st.metric("⚔️ Avg Attack FDR", f"{avg_attack_fdr:.2f}")
+        
+        with col3:
+            if 'defense_fdr' in fixtures_df.columns:
+                avg_defense_fdr = fixtures_df['defense_fdr'].mean()
+                st.metric("🛡️ Avg Defense FDR", f"{avg_defense_fdr:.2f}")
+        
+        with col4:
+            if 'combined_fdr' in fixtures_df.columns:
+                avg_combined_fdr = fixtures_df['combined_fdr'].mean()
+                st.metric("🎯 Avg Combined FDR", f"{avg_combined_fdr:.2f}")
+        
+        # Enhanced FDR Heatmap
+        if 'combined_fdr' in fixtures_df.columns:
+            st.subheader("🌡️ FDR Heatmap")
+            fig_heatmap = fdr_visualizer.create_fdr_heatmap(fixtures_df, 'combined')
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+        
+        # Team summary table
+        st.subheader("📋 Team FDR Summary")
+        if not fixtures_df.empty:
+            # Create team summary
+            team_summary = fixtures_df.groupby('team_short_name').agg({
+                'combined_fdr': 'mean',
+                'attack_fdr': 'mean',
+                'defense_fdr': 'mean'
+            }).round(2)
+            
+            # Sort based on user preference
+            if sort_by == "Combined FDR":
+                team_summary = team_summary.sort_values('combined_fdr', ascending=ascending_sort)
+            elif sort_by == "Attack FDR":
+                team_summary = team_summary.sort_values('attack_fdr', ascending=ascending_sort)
+            elif sort_by == "Defense FDR":
+                team_summary = team_summary.sort_values('defense_fdr', ascending=ascending_sort)
+            else:  # Alphabetical
+                team_summary = team_summary.sort_index(ascending=ascending_sort)
+            
+            st.dataframe(team_summary, use_container_width=True)
+
+    def _render_attack_analysis(self, fixtures_df, fdr_visualizer, fdr_threshold, show_opponents):
+        """Enhanced attack FDR analysis"""
+        st.subheader("⚔️ Attack FDR Analysis")
+        st.info("🎯 Lower Attack FDR = Easier to score goals. Target these teams' forwards and attacking midfielders!")
+        
+        if fixtures_df.empty or 'attack_fdr' not in fixtures_df.columns:
+            st.warning("Attack FDR data not available")
+            return
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🟢 Best Attacking Fixtures")
+            attack_summary = fixtures_df.groupby('team_short_name').agg({
+                'attack_fdr': ['mean', 'min', 'count']
+            }).round(2)
+            
+            attack_summary.columns = ['Avg_FDR', 'Best_FDR', 'Fixtures']
+            attack_summary = attack_summary.sort_values('Avg_FDR').head(10)
+            
+            for idx, (team, row) in enumerate(attack_summary.iterrows()):
+                avg_fdr = row['Avg_FDR']
+                color = "🟢" if avg_fdr <= 2 else "🟡" if avg_fdr <= 2.5 else "🔴"
+                
+                st.write(f"{color} **{team}**: {avg_fdr:.2f} FDR")
+        
+        with col2:
+            # Attack FDR heatmap
+            fig_attack = fdr_visualizer.create_fdr_heatmap(fixtures_df, 'attack')
+            st.plotly_chart(fig_attack, use_container_width=True)
+
+    def _render_defense_analysis(self, fixtures_df, fdr_visualizer, fdr_threshold, show_opponents):
+        """Enhanced defense FDR analysis"""
+        st.subheader("🛡️ Defense FDR Analysis")
+        st.info("🛡️ Lower Defense FDR = Easier to keep clean sheets. Target these teams' defenders and goalkeepers!")
+        
+        if fixtures_df.empty or 'defense_fdr' not in fixtures_df.columns:
+            st.warning("Defense FDR data not available")
+            return
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🟢 Best Defensive Fixtures")
+            defense_summary = fixtures_df.groupby('team_short_name').agg({
+                'defense_fdr': ['mean', 'min', 'count']
+            }).round(2)
+            
+            defense_summary.columns = ['Avg_FDR', 'Best_FDR', 'Fixtures']
+            defense_summary = defense_summary.sort_values('Avg_FDR').head(10)
+            
+            for idx, (team, row) in enumerate(defense_summary.iterrows()):
+                avg_fdr = row['Avg_FDR']
+                color = "🟢" if avg_fdr <= 2 else "🟡" if avg_fdr <= 2.5 else "🔴"
+                
+                st.write(f"{color} **{team}**: {avg_fdr:.2f} FDR")
+        
+        with col2:
+            # Defense FDR heatmap
+            fig_defense = fdr_visualizer.create_fdr_heatmap(fixtures_df, 'defense')
+            st.plotly_chart(fig_defense, use_container_width=True)
+
+    def _render_transfer_targets(self, fixtures_df, fdr_threshold):
+        """Enhanced transfer targets based on fixture analysis"""
+        st.subheader("🎯 Transfer Targets")
+        
+        if fixtures_df.empty:
+            st.warning("No fixture data available")
+            return
+        
+        # Find teams with good fixtures
+        good_fixtures = fixtures_df[fixtures_df['combined_fdr'] <= fdr_threshold]
+        
+        if not good_fixtures.empty:
+            target_teams = good_fixtures.groupby('team_short_name')['combined_fdr'].mean().sort_values()
+            
+            st.write("**🎯 Teams with Best Fixtures:**")
+            for team, avg_fdr in target_teams.head(8).items():
+                st.write(f" - **{team}**: Average FDR of {avg_fdr:.2f}")
+        else:
+            st.info("No teams meet the 'good fixture' threshold.")
+
+    def _display_squad_analysis_enhanced(self, team_data):
+        """Enhanced squad analysis with detailed insights"""
+        st.subheader("👥 Squad Analysis")
+        
+        # Player details
+        picks = team_data.get('picks', [])
+        if not picks:
+            st.warning("No squad data available")
+            return
+            
+        squad_ids = [pick['element'] for pick in picks]
+        squad_df = st.session_state.players_df[st.session_state.players_df['id'].isin(squad_ids)]
+        
+        if squad_df.empty:
+            st.warning("Could not retrieve squad player details.")
+            return
+            
+        # Squad stats
+        squad_stats = {
+            'total_cost': squad_df['cost_millions'].sum(),
+            'avg_form': squad_df.get('form', pd.Series(0)).mean(),
+            'form_players': squad_df[squad_df.get('form', 0) >= 6.0].shape[0],
+            'avg_ownership': squad_df.get('selected_by_percent', pd.Series(0)).mean()
+        }
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Cost", f"£{squad_stats['total_cost']:.1f}m")
+        with col2:
+            st.metric("Avg Form", f"{squad_stats['avg_form']:.1f}")
+        with col3:
+            st.metric("In-Form Players", squad_stats['form_players'])
+        with col4:
+            st.metric("Avg Ownership", f"{squad_stats['avg_ownership']:.1f}%")
+            
+        # Squad insights
+        st.write("**💡 Squad Insights**")
+        insights = []
+        if squad_stats['avg_form'] >= 5.5:
+            insights.append("🔥 Squad in excellent form")
+        elif squad_stats['form_players'] <= 4:
+            insights.append("📉 Poor squad form - transfers needed")
+        
+        for insight in insights:
+            st.write(f"• {insight}")
+
+    def _display_performance_benchmarking_enhanced(self, team_data):
+        """Enhanced performance benchmarking"""
+        
+        # Current performance metrics
+        total_points = team_data.get('summary_overall_points', 0)
+        overall_rank = team_data.get('summary_overall_rank', 0)
+        gw_points = team_data.get('summary_event_points', 0)
+        gw_rank = team_data.get('summary_event_rank', 0)
+        
+        # Calculate benchmarks
+        total_managers = 8000000  # Approximate
+        percentile = (1 - (overall_rank / total_managers)) * 100 if overall_rank else 0
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write("**🏆 Season Performance**")
+            st.metric("Total Points", f"{total_points:,}")
+            st.metric("Overall Rank", f"{overall_rank:,}" if overall_rank else "N/A")
+            st.metric("Percentile", f"{percentile:.1f}%")
+            
+        with col2:
+            st.write("**📈 Recent Form**")
+            st.metric("GW Points", gw_points)
+            st.metric("GW Rank", f"{gw_rank:,}" if gw_rank else "N/A")
+            
+            # Performance vs average
+            league_avg = 50
+            diff = gw_points - league_avg
+            st.metric("vs Average", f"{diff:+d} points")
+            
+        with col3:
+            st.write("**💰 Financial Status**")
+            team_value = team_data.get('value', 1000) / 10
+            bank = team_data.get('bank', 0) / 10
+            
+            st.metric("Team Value", f"£{team_value:.1f}m")
+            st.metric("In Bank", f"£{bank:.1f}m")
+            st.metric("Total Budget", f"£{team_value + bank:.1f}m")
+        
+        # Performance insights
+        st.write("**💡 Performance Insights**")
+        
+        if percentile >= 90:
+            st.success("🏆 Elite performance! You're in the top 10%")
+        elif percentile >= 75:
+            st.success("🥇 Excellent performance! Top 25%")
+        elif percentile >= 50:
+            st.info("👍 Above average performance")
+        elif percentile >= 25:
+            st.warning("📈 Room for improvement")
+        else:
+            st.error("🔧 Major improvements needed")
+        
+        # Benchmarking vs league averages
+        
+        benchmarks = {
+            "Elite (Top 1%)": {"points": 1200, "rank": 80000},
+            "Excellent (Top 10%)": {"points": 900, "rank": 800000},
+            "Good (Top 25%)": {"points": 750, "rank": 2000000},
+            "Average (Top 50%)": {"points": 600, "rank": 4000000}
+        }
+        
+        for tier, targets in benchmarks.items():
+            points_diff = total_points - targets["points"]
+            rank_diff = overall_rank - targets["rank"] if overall_rank else 0
+            
+            if points_diff >= 0 and rank_diff <= 0:
+                st.success(f"✅ **{tier}**: Target achieved!")
+            else:
+                points_needed = max(0, targets["points"] - total_points)
+                st.info(f"🎯 **{tier}**: Need {points_needed} more points")
+
+    def _generate_transfer_recommendations(self, squad_df, players_df, fixtures_df):
+        """Generate transfer recommendations based on a combination of factors."""
+        squad_ids = squad_df['id'].tolist()
+
+        # 1. Identify players to transfer out
+        sell_candidates = []
+        for _, player in squad_df.iterrows():
+            score = 0
+            reasons = []
+            
+            # Penalize for bad form
+            if player.get('form', 5) < 2.5:
+                score += (5 - player.get('form', 5)) * 2
+                reasons.append(f"Poor form ({player.get('form', 0):.1f})")
+
+            # Penalize for difficult fixtures
+            if not fixtures_df.empty:
+                player_team_id = player['team']
+                team_fixtures = fixtures_df[fixtures_df['team_id'] == player_team_id]
+                if not team_fixtures.empty:
+                    avg_fdr = team_fixtures['combined_fdr'].mean()
+                    if avg_fdr > 3.5:
+                        score += (avg_fdr - 3.5) * 5
+                        reasons.append(f"Tough fixtures (FDR: {avg_fdr:.2f})")
+            
+            if score > 5:
+                sell_candidates.append({
+                    'player': player,
+                    'score': score,
+                    'reasons': ", ".join(reasons)
+                })
+
+        # 2. Identify players to transfer in
+        buy_candidates = players_df[~players_df['id'].isin(squad_ids)].copy()
+        
+        target_scores = []
+        for _, player in buy_candidates.iterrows():
+            score = 0
+            
+            # Reward for good form
+            score += player.get('form', 0) * 1.5
+            
+            # Reward for good fixtures
+            if not fixtures_df.empty:
+                player_team_id = player['team']
+                team_fixtures = fixtures_df[fixtures_df['team_id'] == player_team_id]
+                if not team_fixtures.empty:
+                    avg_fdr = team_fixtures['combined_fdr'].mean()
+                    if avg_fdr < 2.5:
+                        score += (2.5 - avg_fdr) * 5
+            
+            # Reward for value (points per million)
+            score += player.get('points_per_million', 0) * 2
+
+            if score > 15:
+                 target_scores.append({'player': player, 'score': score})
+
+        # Sort candidates
+        sorted_sells = sorted(sell_candidates, key=lambda x: x['score'], reverse=True)
+        sorted_buys = sorted(target_scores, key=lambda x: x['score'], reverse=True)
+
+        return sorted_sells, sorted_buys
+
+    def _display_transfer_intelligence(self, team_data):
+        """Display transfer intelligence and recommendations"""
+        st.subheader("🔄 Transfer Intelligence")
+        
+        if not st.session_state.data_loaded:
+            st.warning("Load player data to see transfer recommendations")
+            return
+        
+        picks = team_data.get('picks', [])
+        if not picks:
+            st.warning("No squad data available")
+            return
+        
+        players_df = st.session_state.players_df
+        fixtures_df = st.session_state.get('fixtures_df', pd.DataFrame())
+        
+        # Get current squad - use safer column access
+        try:
+            squad_ids = [pick['element'] for pick in picks]
+            
+            # Check if 'id' column exists, if not try other common ID columns
+            if 'id' in players_df.columns:
+                id_column = 'id'
+            elif 'element' in players_df.columns:
+                id_column = 'element'
+            else:
+                st.error("Could not find player ID column in data")
+                return
+            
+            squad_df = players_df[players_df[id_column].isin(squad_ids)]
+        except KeyError as e:
+            st.error(f"Error accessing player data: {e}")
+            return
+        
+        # Generate transfer recommendations
+        sorted_sells, sorted_buys = self._generate_transfer_recommendations(squad_df, players_df, fixtures_df)
+        
+        # Transfer analysis tabs
+        transfer_tab1, transfer_tab2, transfer_tab3 = st.tabs([
+            "🔥 Priority Transfers",
+            "💎 Value Targets", 
+            "📈 Form Players"
+        ])
+        
+        with transfer_tab1:
+            st.write("**⚠️ Players to Consider Selling**")
+            
+            if sorted_sells:
+                for candidate in sorted_sells[:5]:
+                    player = candidate['player']
+                    st.warning(f"🔴 **{player['web_name']}** (£{player.get('now_cost', 0)/10:.1f}m) - {candidate['reasons']}")
+            else:
+                st.success("✅ No obvious players to sell!")
+        
+        with transfer_tab2:
+            st.write("**💰 Best Value Targets**")
+            
+            if sorted_buys:
+                for candidate in sorted_buys[:5]:
+                    player = candidate['player']
+                    st.success(f"💎 **{player['web_name']}** (£{player.get('now_cost', 0)/10:.1f}m) - Score: {candidate['score']:.1f}")
+        
+        with transfer_tab3:
+            st.write("**🔥 In-Form Players**")
+            
+            # Find form players not in squad
+            available_players = players_df[~players_df['id'].isin(squad_ids)]
+            
+            form_targets = available_players[
+                (available_players.get('form', 0) >= 6) &
+                (available_players['total_points'] > 30)
+            ].nlargest(5, 'form')
+            
+            for _, player in form_targets.iterrows():
+                st.success(f"🔥 **{player['web_name']}** (£{player.get('now_cost', 0)/10:.1f}m) - Form: {player.get('form', 0):.1f}")
+
+    def _display_strategy_planning(self, team_data):
+        """Display strategy and planning recommendations"""
+        st.subheader("🎯 Strategy & Planning")
+        
+        # Strategy tabs
+        strategy_tab1, strategy_tab2, strategy_tab3 = st.tabs([
+            "📅 Short-term (1-3 GWs)",
+            "🗓️ Medium-term (4-8 GWs)", 
+            "🏆 Long-term (Season)"
+        ])
+        
+        with strategy_tab1:
+            st.write("**⚡ Immediate Priorities**")
+            
+            priorities = [
+                "🎯 **Captain Selection**: Choose between premium options",
+                "🪑 **Bench Order**: Optimize bench for potential returns",
+                "🏥 **Injury Watch**: Monitor player fitness updates",
+                "📰 **Team News**: Stay updated on lineup changes",
+                "🔄 **Transfer Timing**: Plan moves around price changes"
+            ]
+            
+            for priority in priorities:
+                st.write(f"• {priority}")
+        
+        with strategy_tab2:
+            st.write("**📈 Medium-term Strategy**")
+            st.info("🔍 Planning fixture swings and player trends...")
+            
+            medium_goals = [
+                "🎲 **Fixture Analysis**: Target teams with improving fixtures",
+                "💰 **Price Movements**: Monitor and predict price changes",
+                "🔄 **Transfer Planning**: Plan 2-3 move sequences",
+                "🎯 **Template Moves**: Balance following vs differentials"
+            ]
+            
+            for goal in medium_goals:
+                st.write(f"• {goal}")
+        
+        with strategy_tab3:
+            st.write("🏆 Season-Long Strategy")
+            st.info("🎖️ Building towards end-of-season success...")
+            
+            term_strategies = [
+                "🎪 **Chip Strategy**: Plan optimal timing for all chips",
+                "📈 **Rank Targets**: Set and track ranking goals",
+                "⚖️ **Risk Management**: Balance safety vs differentials",
+                "🏆 **End Game**: Prepare for final gameweeks push",
+            ]
+            
+            for strategy in term_strategies:
+                st.markdown(f"- {strategy}")
+        
+
+    def _display_chip_strategy_enhanced(self, team_data):
+        """Enhanced chip strategy analysis"""
+        used_chips = [chip['name'] for chip in team_data.get('chips', [])]
+        available_chips = []
+        if 'wildcard' not in [chip.lower() for chip in used_chips]:
+            available_chips.append('Wildcard')
+        if 'bench_boost' not in [chip.lower() for chip in used_chips]:
+            available_chips.append('Bench Boost')
+        if 'triple_captain' not in [chip.lower() for chip in used_chips]:
+            available_chips.append('Triple Captain')
+        if 'free_hit' not in [chip.lower() for chip in used_chips]:
+            available_chips.append('Free Hit')
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**✅ Chips Used**")
+            if used_chips:
+                for chip in used_chips:
+                    st.write(f"• {chip}")
+            else:
+                st.write("• None used yet")
+        
+        with col2:
+            st.write("**💎 Chips Available**")
+            if available_chips:
+                for chip in available_chips:
+                    st.write(f"• {chip}")
+            else:
+                st.write("• All chips used")
+        
+        # Chip recommendations
+        if available_chips:
+            st.write("**🎯 Chip Usage Recommendations**")
+            
+            for chip in available_chips:
+                with st.expander(f"💎 {chip} Strategy"):
+                    if chip == 'Wildcard':
+                        st.write("**Optimal Timing:**")
+                        st.write("• During international breaks")
+                        st.write("• When 4+ players need changing")
+                        st.write("• Before fixture swings")
+                        
+                    elif chip == 'Bench Boost':
+                        st.write("**Optimal Timing:**")
+                        st.write("• Double gameweeks")
+                        st.write("• When bench has good fixtures")
+                        st.write("• Late in season for rank pushes")
+                        
+                    elif chip == 'Triple Captain':
+                        st.write("**Optimal Timing:**")
+                        st.write("• Double gameweeks")
+                        st.write("• Haaland vs weak opposition")
+                        st.write("• Salah at home vs poor defense")
+                        
+                    elif chip == 'Free Hit':
+                        st.write("**Optimal Timing:**")
+                        st.write("• Blank gameweeks")
+                        st.write("• When many players don't play")
+                        st.write("• Cup final gameweeks")
+
+    def _generate_swot_analysis(self, team_data, players_df, fixtures_df):
+        """Generate a dynamic SWOT analysis for the user's team"""
+        squad_ids = [pick['element'] for pick in team_data.get('picks', [])]
+        squad_df = players_df[players_df['id'].isin(squad_ids)]
+
+        if squad_df.empty:
+            return [], [], [], []
+
+        # Strengths
+        strengths = []
+        in_form_players = squad_df[squad_df.get('form', 0) > 5].shape[0]
+        if in_form_players >= 5:
+            strengths.append(f"Strong form with {in_form_players} players performing well.")
+        
+        premium_players = squad_df[squad_df['cost_millions'] >= 10].shape[0]
+        if premium_players >= 2:
+            strengths.append(f"Solid premium core with {premium_players} high-value assets.")
+
+        # Weaknesses
+        weaknesses = []
+        out_of_form_players = squad_df[squad_df.get('form', 10) < 3].shape[0]
+        if out_of_form_players > 2:
+            weaknesses.append(f"Significant weakness with {out_of_form_players} players out of form.")
+        
+        # Fixed: Remove the problematic bench value calculation that was causing the is_starting error
+        # Since 'is_starting' doesn't exist in FPL API picks data, we'll skip this calculation
+        # bench_value = squad_df[~squad_df['id'].isin([p['element'] for p in team_data.get('picks', []) if p.get('is_starting', False)])]['cost_millions'].sum()
+        # if bench_value > 20:
+        #     weaknesses.append(f"Potentially expensive bench (£{bench_value:.1f}m), tying up funds.")
+
+        # Opportunities
+        opportunities = []
+        if not fixtures_df.empty:
+            squad_fixtures = fixtures_df[fixtures_df['team_id'].isin(squad_df['team'].unique())]
+            if not squad_fixtures.empty:
+                avg_fdr = squad_fixtures.groupby('team_name')['combined_fdr'].mean().nsmallest(3)
+                for team, fdr in avg_fdr.items():
+                    opportunities.append(f"Excellent upcoming fixtures for {team} (Avg FDR: {fdr:.2f}).")
+
+        # Threats
+        threats = []
+        if not fixtures_df.empty:
+            squad_fixtures = fixtures_df[fixtures_df['team_id'].isin(squad_df['team'].unique())]
+            if not squad_fixtures.empty:
+                bad_fdr = squad_fixtures.groupby('team_name')['combined_fdr'].mean().nlargest(3)
+                for team, fdr in bad_fdr.items():
+                    if fdr > 3.5:
+                        threats.append(f"Tough fixture run for {team} (Avg FDR: {fdr:.2f}).")
+        
+        return strengths, weaknesses, opportunities, threats
+
+    def _display_swot_analysis_enhanced(self, team_data):
+        """Enhanced SWOT analysis display"""
+        st.subheader("📈 SWOT Analysis")
+
+        if 'fixtures_df' not in st.session_state or st.session_state.fixtures_df.empty:
+            st.warning("Load Fixture Data from the 'Fixture Difficulty' tab for a full SWOT analysis.")
+        
+        strengths, weaknesses, opportunities, threats = self._generate_swot_analysis(
+            team_data, 
+            st.session_state.players_df,
+            st.session_state.get('fixtures_df', pd.DataFrame())
+        )
+        
+        # SWOT quadrants
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.success("**💪 Strengths**")
+            if strengths:
+                for item in strengths:
+                    st.write(f"• {item}")
+            else:
+                st.write("• No significant strengths identified.")
+
+            st.error("**⚠️ Weaknesses**")
+            if weaknesses:
+                for item in weaknesses:
+                    st.write(f"• {item}")
+            else:
+                st.write("• No significant weaknesses identified.")
+        
+        with col2:
+            st.info("**🎯 Opportunities**")
+            if opportunities:
+                for item in opportunities:
+                    st.write(f"• {item}")
+            else:
+                st.write("• No clear opportunities from fixture analysis.")
+
+            st.warning("**⚡ Threats**")
+            if threats:
+                for item in threats:
+                    st.write(f"• {item}")
+            else:
+                st.write("• No immediate threats from fixture analysis.")
+
+    def _generate_ai_targets(self, df, price_range, positions, min_form, max_ownership):
+        """Generate AI-powered player targets"""
+        targets = {}
+        
+        # Position mapping
+        position_map = {
+            "Goalkeeper": 1,
+            "Defender": 2, 
+            "Midfielder": 3,
+            "Forward": 4
+        }
+        
+        for position in positions:
+            if position in position_map:
+                position_id = position_map[position]
+                
+                # Filter players
+                filtered = df[
+                    (df['element_type'] == position_id) &
+                    (df['cost_millions'] >= price_range[0]) &
+                    (df['cost_millions'] <= price_range[1]) &
+                    (df.get('form', 0) >= min_form) &
+                    (df.get('selected_by_percent', 0) <= max_ownership) &
+                    (df['total_points'] > 20)
+                ]
+                
+                # Calculate AI score
+                if not filtered.empty:
+                    filtered = filtered.copy()
+                    filtered['ai_score'] = (
+                        filtered.get('form', 0) * 2 +
+                        filtered['total_points'] / 10 +
+                        (100 - filtered.get('selected_by_percent', 50)) / 20 +
+                        filtered.get('points_per_million', 0) / 2
+                    )
+                    
+                    # Top players for this position
+                    top_players = filtered.nlargest(5, 'ai_score')
+                    
+                    targets[position] = []
+                    for _, player in top_players.iterrows():
+                        targets[position].append({
+                            'name': player['web_name'],
+                            'team': player.get('team_short_name', 'Unknown'),
+                            'price': player['cost_millions'],
+                            'points': player['total_points'],
+                            'form': player.get('form', 0),
+                            'ownership': player.get('selected_by_percent', 0),
+                            'value': player.get('points_per_million', 0),
+                            'ai_score': player['ai_score']
+                        })
+        
+        return targets
+
+    def _analyze_player_form(self, df):
+        """Enhanced player form analysis with comprehensive insights"""
+        if 'form' not in df.columns:
+            return {'hot_form': [], 'cold_form': [], 'form_trends': [], 'form_stats': {}}
+        
+        # Filter for active players with meaningful data
+        active_players = df[
+            (df['total_points'] > 20) & 
+            (df.get('minutes', 0) > 200)  # Ensure they're getting game time
+        ].copy()
+        
+        if active_players.empty:
+            return {'hot_form': [], 'cold_form': [], 'form_trends': [], 'form_stats': {}}
+        
+        # Enhanced hot form analysis (trending upward)
+        hot_form = active_players[
+            (active_players['form'] >= 6.0) & 
+            (active_players['total_points'] > 30) &
+            (active_players.get('selected_by_percent', 100) <= 40)  # Not too template
+        ].nlargest(15, 'form')
+        
+        # Enhanced cold form analysis (trending downward)
+        cold_form = active_players[
+            (active_players['form'] <= 4.0) & 
+            (active_players['total_points'] > 40) &  # Established players only
+            (active_players['cost_millions'] >= 6.0)  # Expensive disappointments
+        ].nsmallest(15, 'form')
+        
+        # Form trend analysis (form vs season average)
+        form_trends = []
+        for _, player in active_players.iterrows():
+            season_avg = player['total_points'] / 38 if player['total_points'] > 0 else 0
+            current_form = player.get('form', 0)
+            
+            if current_form > season_avg * 1.5:  # Significantly outperforming
+                trend = "📈 Hot Streak"
+                trend_score = (current_form / max(season_avg, 1)) * 10
+            elif current_form < season_avg * 0.6:  # Significantly underperforming
+                trend = "📉 Poor Patch"
+                trend_score = -(season_avg / max(current_form, 0.1)) * 5
+            else:
+                trend = "➡️ Stable"
+                trend_score = 0
+            
+            if abs(trend_score) > 3:  # Only significant trends
+                form_trends.append({
+                    'name': player['web_name'],
+                    'team': player.get('team_short_name', 'N/A'),
+                    'form': current_form,
+                    'season_avg': season_avg,
+                    'trend': trend,
+                    'trend_score': trend_score,
+                    'price': player['cost_millions'],
+                    'ownership': player.get('selected_by_percent', 0),
+                    'minutes': player.get('minutes', 0)
+                })
+        
+        # Sort form trends by significance
+        form_trends.sort(key=lambda x: abs(x['trend_score']), reverse=True)
+        
+        # Calculate form statistics
+        form_stats = {
+            'avg_form': active_players['form'].mean(),
+            'high_form_count': len(hot_form),
+            'low_form_count': len(cold_form),
+            'form_volatility': active_players['form'].std(),
+            'top_form_player': active_players.loc[active_players['form'].idxmax(), 'web_name'] if not active_players.empty else 'N/A',
+            'worst_form_player': active_players.loc[active_players['form'].idxmin(), 'web_name'] if not active_players.empty else 'N/A'
+        }
+        
+        return {
+            'hot_form': [
+                {
+                    'name': row['web_name'],
+                    'team': row.get('team_short_name', 'N/A'),
+                    'form': row['form'],
+                    'total_points': row['total_points'],
+                    'price': row['cost_millions'],
+                    'ownership': row.get('selected_by_percent', 0),
+                    'value_score': row.get('points_per_million', 0),
+                    'position': row.get('position_name', 'Unknown'),
+                    'minutes': row.get('minutes', 0),
+                    'recommendation': self._get_form_recommendation(row, 'hot')
+                }
+                for _, row in hot_form.iterrows()
+            ],
+            'cold_form': [
+                {
+                    'name': row['web_name'],
+                    'team': row.get('team_short_name', 'N/A'),
+                    'form': row['form'],
+                    'total_points': row['total_points'],
+                    'price': row['cost_millions'],
+                    'ownership': row.get('selected_by_percent', 0),
+                    'value_score': row.get('points_per_million', 0),
+                    'position': row.get('position_name', 'Unknown'),
+                    'minutes': row.get('minutes', 0),
+                    'recommendation': self._get_form_recommendation(row, 'cold')
+                }
+                for _, row in cold_form.iterrows()
+            ],
+            'form_trends': form_trends[:10],  # Top 10 significant trends
+            'form_stats': form_stats
+        }
+    
+    def _get_form_recommendation(self, player, form_type):
+        """Generate specific recommendations based on player form"""
+        ownership = player.get('selected_by_percent', 0)
+        price = player['cost_millions']
+        
+        if form_type == 'hot':
+            if ownership < 10:
+                return "🔥 **DIFFERENTIAL**: Excellent form and low ownership. High reward potential."
+            elif ownership < 25:
+                return "📈 **BANDWAGON**: Jumping on a popular, in-form player. Good, but not unique."
+            else:
+                return "✅ **TEMPLATE**: Essential player to own right now. Don't get left behind."
+        else:  # cold form
+            if price >= 10:
+                return "🚨 **PREMIUM SELL**: Expensive player not delivering. Free up funds."
+            elif ownership >= 30:
+                return "📉 **TEMPLATE SELL**: High ownership but poor form. Good time to sell."
+            else:
+                return "👀 **MONITOR**: Keep watching, but avoid transferring in."
+
+    def _generate_transfer_advice(self, df):
+        """Generate transfer advice based on various factors"""
+        # Filter active players
+        active_players = df[df['total_points'] > 20].copy()
+        
+        if active_players.empty:
+            return {'targets': [], 'sells': []}
+        
+        targets = []
+        sells = []
+        
+        # Transfer targets (high form, good value)
+        if 'form' in active_players.columns and 'points_per_million' in active_players.columns:
+            good_targets = active_players[
+                (active_players['form'] >= 7) &
+                (active_players['points_per_million'] >= 8) &
+                (active_players.get('selected_by_percent', 50) <= 30)
+            ].head(5)
+            
+            for _, player in good_targets.iterrows():
+                targets.append({
+                    'player': player['web_name'],
+                    'reason': f"High form ({player['form']:.1f}) and great value ({player['points_per_million']:.1f} pts/£m)"
+                })
+        
+        # Players to sell (poor form, high ownership)
+        if 'form' in active_players.columns:
+            sell_candidates = active_players[
+                (active_players['form'] <= 3) &
+                (active_players['cost_millions'] >= 7) &
+                (active_players.get('selected_by_percent', 0) >= 20)
+            ].head(5)
+            
+            for _, player in sell_candidates.iterrows():
+                sells.append({
+                    'player': player['web_name'],
+                    'reason': f"Poor form ({player['form']:.1f}) despite high price (£{player['cost_millions']:.1f}m)"
+                })
+        
+        return {
+            'targets': targets,
+            'sells': sells
         }
 
 # Main execution

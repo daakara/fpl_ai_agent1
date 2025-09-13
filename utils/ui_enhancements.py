@@ -1,472 +1,466 @@
 """
 Enhanced UI Components for FPL Analytics App
-Provides reusable, accessible, and responsive UI components
+Provides reusable, accessible, and responsive UI components with modern design
 """
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime
 import pandas as pd
+import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-class UIComponents:
-    """Collection of reusable UI components"""
+class ModernUIComponents:
+    """Modern UI components with enhanced UX"""
     
     @staticmethod
-    def render_loading_state(message: str = "Loading...", progress: Optional[float] = None):
-        """Render loading state with optional progress"""
-        try:
-            import streamlit as st
-            
-            col1, col2, col3 = st.columns([1, 2, 1])
-            
-            with col2:
-                if progress is not None:
-                    st.progress(progress)
-                
-                with st.spinner(message):
-                    st.empty()
+    def render_hero_section(title: str, subtitle: str, metrics: Dict[str, Any] = None):
+        """Render hero section with key metrics"""
+        st.markdown(f"""
+        <div style='text-align: center; padding: 2rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 2rem; color: white;'>
+            <h1 style='margin: 0; font-size: 2.5rem; font-weight: 700;'>{title}</h1>
+            <p style='margin: 0.5rem 0 0 0; font-size: 1.2rem; opacity: 0.9;'>{subtitle}</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        except ImportError:
-            print(f"Loading: {message}")
+        if metrics:
+            cols = st.columns(len(metrics))
+            for i, (label, value) in enumerate(metrics.items()):
+                with cols[i]:
+                    st.metric(label, value)
     
     @staticmethod
-    def render_metric_card(title: str, value: str, delta: Optional[str] = None, 
-                          delta_color: str = "normal", help_text: Optional[str] = None):
-        """Render enhanced metric card"""
-        try:
-            import streamlit as st
-            
+    def render_insights_panel(insights: List[Dict[str, str]], title: str = "💡 Key Insights"):
+        """Render insights panel with categorized insights"""
+        st.subheader(title)
+        
+        # Categorize insights by type
+        categories = {
+            'positive': {'icon': '✅', 'color': '#28a745', 'items': []},
+            'warning': {'icon': '⚠️', 'color': '#ffc107', 'items': []},
+            'negative': {'icon': '❌', 'color': '#dc3545', 'items': []},
+            'info': {'icon': 'ℹ️', 'color': '#17a2b8', 'items': []}
+        }
+        
+        for insight in insights:
+            insight_type = insight.get('type', 'info')
+            if insight_type in categories:
+                categories[insight_type]['items'].append(insight)
+        
+        for category, data in categories.items():
+            if data['items']:
+                for item in data['items']:
+                    st.markdown(f"""
+                    <div style='padding: 0.75rem; margin: 0.5rem 0; border-left: 4px solid {data['color']}; background-color: {data['color']}15; border-radius: 0 8px 8px 0;'>
+                        <strong>{data['icon']} {item.get('title', 'Insight')}</strong><br>
+                        {item.get('description', '')}
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+    @staticmethod
+    def render_performance_dashboard(data: Dict[str, Any]):
+        """Render comprehensive performance dashboard"""
+        st.subheader("📊 Performance Dashboard")
+        
+        # Key metrics row
+        col1, col2, col3, col4 = st.columns(4)
+        metrics = data.get('metrics', {})
+        
+        with col1:
             st.metric(
-                label=title,
-                value=value,
-                delta=delta,
-                delta_color=delta_color,
-                help=help_text
+                "Overall Score",
+                f"{metrics.get('overall_score', 0)}/100",
+                delta=f"{metrics.get('score_change', 0):+.1f}"
             )
         
-        except ImportError:
-            print(f"{title}: {value} {delta or ''}")
-    
-    @staticmethod
-    def render_data_table(data: pd.DataFrame, 
-                         title: str = "",
-                         searchable: bool = True,
-                         sortable: bool = True,
-                         column_config: Optional[Dict] = None,
-                         selection_mode: str = "single"):
-        """Render enhanced data table"""
-        try:
-            import streamlit as st
-            
-            if title:
-                st.subheader(title)
-            
-            # Search functionality
-            if searchable and not data.empty:
-                search_term = st.text_input("🔍 Search", key=f"search_{title}")
-                
-                if search_term:
-                    # Simple text search across all columns
-                    mask = data.astype(str).apply(
-                        lambda x: x.str.contains(search_term, case=False, na=False)
-                    ).any(axis=1)
-                    data = data[mask]
-            
-            # Display table
-            if not data.empty:
-                st.dataframe(
-                    data,
-                    column_config=column_config,
-                    use_container_width=True,
-                    hide_index=True
-                )
-            else:
-                st.info("No data to display")
+        with col2:
+            st.metric(
+                "Form Rating",
+                f"{metrics.get('form_rating', 0):.1f}/10",
+                delta=f"{metrics.get('form_change', 0):+.1f}"
+            )
         
-        except ImportError:
-            print(f"Table: {title}")
-            print(data.head() if not data.empty else "No data")
+        with col3:
+            st.metric(
+                "Value Efficiency",
+                f"{metrics.get('value_efficiency', 0):.1f}",
+                delta=f"{metrics.get('efficiency_change', 0):+.1f}"
+            )
+        
+        with col4:
+            st.metric(
+                "Risk Level",
+                metrics.get('risk_level', 'Medium'),
+                help="Lower risk = more predictable performance"
+            )
+        
+        # Performance breakdown
+        if 'breakdown' in data:
+            breakdown = data['breakdown']
+            
+            # Create radar chart for multi-dimensional performance
+            categories = list(breakdown.keys())
+            values = list(breakdown.values())
+            
+            fig = go.Figure()
+            
+            fig.add_trace(go.Scatterpolar(
+                r=values,
+                theta=categories,
+                fill='toself',
+                name='Performance',
+                line_color='rgb(102, 126, 234)',
+                fillcolor='rgba(102, 126, 234, 0.25)'
+            ))
+            
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True,
+                        range=[0, 100]
+                    )),
+                showlegend=False,
+                title="Performance Breakdown",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
     
     @staticmethod
-    def render_filter_panel(filters: Dict[str, Dict], 
-                           data: pd.DataFrame,
-                           key_prefix: str = "filter") -> Dict[str, Any]:
-        """Render dynamic filter panel"""
-        try:
-            import streamlit as st
+    def render_smart_filters(filter_config: Dict[str, Dict], data: pd.DataFrame, key_prefix: str = "filter") -> Dict[str, Any]:
+        """Render smart filter panel with search and presets"""
+        st.subheader("🎛️ Smart Filters")
+        
+        # Filter presets
+        presets = {
+            "🏆 Premium Players": {"min_cost": 9.0, "min_points": 100},
+            "💎 Budget Gems": {"max_cost": 6.0, "min_form": 6.0},
+            "🔥 In Form": {"min_form": 7.0, "min_minutes": 800},
+            "💰 Best Value": {"min_ppm": 8.0, "max_ownership": 15.0}
+        }
+        
+        selected_preset = st.selectbox("Quick Filters:", ["Custom"] + list(presets.keys()))
+        
+        filter_values = {}
+        
+        # Apply preset if selected
+        if selected_preset != "Custom":
+            preset_values = presets[selected_preset]
+            st.info(f"Applied preset: {selected_preset}")
+        else:
+            preset_values = {}
+        
+        # Render individual filters
+        cols = st.columns(min(len(filter_config), 4))
+        
+        for i, (filter_name, config) in enumerate(filter_config.items()):
+            col_idx = i % 4
             
-            st.subheader("🎛️ Filters")
-            
-            filter_values = {}
-            
-            for filter_name, filter_config in filters.items():
-                filter_type = filter_config.get('type', 'text')
-                label = filter_config.get('label', filter_name)
+            with cols[col_idx]:
+                filter_type = config.get('type', 'text')
+                label = config.get('label', filter_name)
+                default_value = preset_values.get(filter_name, config.get('default'))
                 
-                if filter_type == 'selectbox':
-                    options = filter_config.get('options', [])
-                    if not options and filter_config.get('column') in data.columns:
-                        options = sorted(data[filter_config['column']].unique())
+                if filter_type == 'slider' and config.get('column') in data.columns:
+                    col_data = data[config['column']]
+                    min_val = config.get('min_value', col_data.min())
+                    max_val = config.get('max_value', col_data.max())
                     
-                    filter_values[filter_name] = st.selectbox(
-                        label,
-                        options,
-                        key=f"{key_prefix}_{filter_name}"
-                    )
+                    if isinstance(default_value, (list, tuple)):
+                        filter_values[filter_name] = st.slider(
+                            label, min_val, max_val, default_value,
+                            key=f"{key_prefix}_{filter_name}"
+                        )
+                    else:
+                        filter_values[filter_name] = st.slider(
+                            label, min_val, max_val, (min_val, max_val),
+                            key=f"{key_prefix}_{filter_name}"
+                        )
                 
                 elif filter_type == 'multiselect':
-                    options = filter_config.get('options', [])
-                    if not options and filter_config.get('column') in data.columns:
-                        options = sorted(data[filter_config['column']].unique())
+                    options = config.get('options', [])
+                    if not options and config.get('column') in data.columns:
+                        options = sorted(data[config['column']].unique())
                     
                     filter_values[filter_name] = st.multiselect(
-                        label,
-                        options,
-                        default=filter_config.get('default', []),
+                        label, options, default=default_value or [],
                         key=f"{key_prefix}_{filter_name}"
                     )
-                
-                elif filter_type == 'slider':
-                    col_data = data[filter_config['column']] if filter_config.get('column') in data.columns else []
-                    min_val = filter_config.get('min_value', col_data.min() if len(col_data) > 0 else 0)
-                    max_val = filter_config.get('max_value', col_data.max() if len(col_data) > 0 else 100)
-                    
-                    filter_values[filter_name] = st.slider(
-                        label,
-                        min_value=min_val,
-                        max_value=max_val,
-                        value=filter_config.get('default', (min_val, max_val)),
-                        key=f"{key_prefix}_{filter_name}"
-                    )
-                
-                elif filter_type == 'number_input':
-                    filter_values[filter_name] = st.number_input(
-                        label,
-                        min_value=filter_config.get('min_value', 0),
-                        max_value=filter_config.get('max_value', 1000),
-                        value=filter_config.get('default', 0),
-                        key=f"{key_prefix}_{filter_name}"
-                    )
-                
-                elif filter_type == 'text':
-                    filter_values[filter_name] = st.text_input(
-                        label,
-                        value=filter_config.get('default', ''),
-                        key=f"{key_prefix}_{filter_name}"
-                    )
-            
-            return filter_values
         
-        except ImportError:
-            print("Filter panel rendered")
-            return {}
+        return filter_values
     
     @staticmethod
-    def render_comparison_cards(items: List[Dict[str, Any]], 
-                               title: str = "Comparison",
-                               max_columns: int = 3):
-        """Render comparison cards for multiple items"""
-        try:
-            import streamlit as st
-            
-            st.subheader(title)
-            
-            # Create columns based on number of items
-            num_items = len(items)
-            num_cols = min(num_items, max_columns)
-            
-            if num_cols > 0:
-                cols = st.columns(num_cols)
-                
-                for i, item in enumerate(items):
-                    col_idx = i % num_cols
-                    
-                    with cols[col_idx]:
-                        # Card container
-                        with st.container():
-                            st.markdown(f"**{item.get('name', f'Item {i+1}')}**")
-                            
-                            # Render metrics
-                            for key, value in item.items():
-                                if key != 'name':
-                                    formatted_key = key.replace('_', ' ').title()
-                                    st.metric(formatted_key, value)
+    def render_comparison_matrix(players: List[Dict], metrics: List[str]):
+        """Render advanced player comparison matrix"""
+        if not players or not metrics:
+            st.warning("No players or metrics provided for comparison")
+            return
         
-        except ImportError:
-            print(f"Comparison: {title}")
-            for item in items:
-                print(f"  - {item}")
-    
-    @staticmethod
-    def render_alert(message: str, alert_type: str = "info", 
-                    dismissible: bool = False, icon: Optional[str] = None):
-        """Render styled alert messages"""
-        try:
-            import streamlit as st
-            
-            alert_icons = {
-                'success': '✅',
-                'info': 'ℹ️',
-                'warning': '⚠️',
-                'error': '❌'
-            }
-            
-            display_icon = icon or alert_icons.get(alert_type, 'ℹ️')
-            formatted_message = f"{display_icon} {message}"
-            
-            if alert_type == 'success':
-                st.success(formatted_message)
-            elif alert_type == 'warning':
-                st.warning(formatted_message)
-            elif alert_type == 'error':
-                st.error(formatted_message)
-            else:
-                st.info(formatted_message)
+        st.subheader("⚖️ Advanced Player Comparison")
         
-        except ImportError:
-            print(f"Alert ({alert_type}): {message}")
-    
-    @staticmethod
-    def render_progress_tracker(steps: List[str], current_step: int):
-        """Render progress tracker for multi-step processes"""
-        try:
-            import streamlit as st
-            
-            st.markdown("### Progress")
-            
-            progress_container = st.container()
-            
-            with progress_container:
-                cols = st.columns(len(steps))
-                
-                for i, step in enumerate(steps):
-                    with cols[i]:
-                        if i < current_step:
-                            st.markdown(f"✅ **{step}**")
-                        elif i == current_step:
-                            st.markdown(f"🔄 **{step}**")
-                        else:
-                            st.markdown(f"⏳ {step}")
-                
-                # Progress bar
-                progress = (current_step + 1) / len(steps)
-                st.progress(progress)
+        # Create comparison DataFrame
+        comparison_data = []
+        for player in players:
+            row = {'Player': player.get('name', 'Unknown')}
+            for metric in metrics:
+                row[metric] = player.get(metric, 0)
+            comparison_data.append(row)
         
-        except ImportError:
-            print(f"Progress: Step {current_step + 1} of {len(steps)}")
-    
-    @staticmethod
-    def render_expandable_section(title: str, content_func: Callable, 
-                                 expanded: bool = False, key: Optional[str] = None):
-        """Render expandable section with dynamic content"""
-        try:
-            import streamlit as st
-            
-            with st.expander(title, expanded=expanded):
-                content_func()
+        df = pd.DataFrame(comparison_data)
         
-        except ImportError:
-            print(f"Section: {title}")
-            content_func()
-    
-    @staticmethod
-    def render_sidebar_navigation(pages: Dict[str, str], 
-                                 current_page: str = None) -> str:
-        """Render sidebar navigation menu"""
-        try:
-            import streamlit as st
-            
-            st.sidebar.title("🧭 Navigation")
-            
-            # Create navigation buttons
-            selected_page = None
-            
-            for page_name, page_key in pages.items():
-                if st.sidebar.button(
-                    page_name, 
-                    key=f"nav_{page_key}",
-                    use_container_width=True,
-                    type="primary" if page_key == current_page else "secondary"
-                ):
-                    selected_page = page_key
-            
-            return selected_page or current_page
-        
-        except ImportError:
-            print("Navigation menu")
-            return current_page
-    
-    @staticmethod
-    def render_status_badge(status: str, status_config: Optional[Dict] = None):
-        """Render status badge with color coding"""
-        try:
-            import streamlit as st
-            
-            default_config = {
-                'active': {'color': 'green', 'icon': '🟢'},
-                'inactive': {'color': 'red', 'icon': '🔴'},
-                'pending': {'color': 'orange', 'icon': '🟡'},
-                'warning': {'color': 'yellow', 'icon': '⚠️'},
-                'info': {'color': 'blue', 'icon': 'ℹ️'}
-            }
-            
-            config = status_config or default_config
-            status_info = config.get(status.lower(), {'color': 'gray', 'icon': '⚪'})
-            
-            icon = status_info.get('icon', '⚪')
-            st.markdown(f"{icon} **{status.title()}**")
-        
-        except ImportError:
-            print(f"Status: {status}")
-
-class ChartComponents:
-    """Specialized chart components"""
-    
-    @staticmethod
-    def render_performance_chart(data: pd.DataFrame, 
-                               x_column: str, 
-                               y_column: str,
-                               title: str = "Performance Chart"):
-        """Render performance chart with trend line"""
-        try:
-            import streamlit as st
-            import plotly.express as px
-            
-            if not data.empty and x_column in data.columns and y_column in data.columns:
-                fig = px.line(
-                    data, 
-                    x=x_column, 
-                    y=y_column,
-                    title=title,
-                    markers=True
-                )
-                
-                fig.update_layout(
-                    xaxis_title=x_column.replace('_', ' ').title(),
-                    yaxis_title=y_column.replace('_', ' ').title(),
-                    hovermode='x unified'
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Insufficient data for chart")
-        
-        except ImportError:
-            print(f"Chart: {title}")
-    
-    @staticmethod
-    def render_comparison_chart(data: Dict[str, List], 
-                              chart_type: str = "bar",
-                              title: str = "Comparison Chart"):
-        """Render comparison chart"""
-        try:
-            import streamlit as st
-            import plotly.express as px
-            import pandas as pd
-            
-            # Convert dict to DataFrame
-            df = pd.DataFrame(data)
-            
-            if not df.empty:
-                if chart_type == "bar":
-                    fig = px.bar(df, title=title)
-                elif chart_type == "line":
-                    fig = px.line(df, title=title)
-                elif chart_type == "scatter":
-                    fig = px.scatter(df, title=title)
+        # Normalize metrics for visualization
+        normalized_df = df.copy()
+        for metric in metrics:
+            if metric in df.columns and pd.api.types.is_numeric_dtype(df[metric]):
+                min_val = df[metric].min()
+                max_val = df[metric].max()
+                if max_val > min_val:
+                    normalized_df[f'{metric}_norm'] = (df[metric] - min_val) / (max_val - min_val)
                 else:
-                    fig = px.bar(df, title=title)  # Default to bar
-                
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("No data available for chart")
+                    normalized_df[f'{metric}_norm'] = 0.5
         
-        except ImportError:
-            print(f"Chart: {title}")
-
-# Global UI components instance
-ui = UIComponents()
-charts = ChartComponents()
-
-def create_responsive_layout(mobile_columns: int = 1, 
-                           tablet_columns: int = 2, 
-                           desktop_columns: int = 3):
-    """Create responsive layout based on screen size"""
-    try:
-        import streamlit as st
+        # Create heatmap
+        heatmap_data = normalized_df[[f'{m}_norm' for m in metrics if f'{m}_norm' in normalized_df.columns]]
         
-        # For now, use desktop layout (could be enhanced with JS for responsive detection)
-        return st.columns(desktop_columns)
+        if not heatmap_data.empty:
+            fig = px.imshow(
+                heatmap_data.T,
+                labels=dict(x="Players", y="Metrics", color="Performance"),
+                x=df['Player'],
+                y=metrics,
+                color_continuous_scale="RdYlGn",
+                title="Player Performance Heatmap"
+            )
+            
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Display raw data
+        st.dataframe(df, use_container_width=True)
     
-    except ImportError:
-        return [None] * desktop_columns
-
-def render_footer():
-    """Render application footer"""
-    try:
-        import streamlit as st
+    @staticmethod
+    def render_trend_analysis(data: pd.DataFrame, x_col: str, y_col: str, group_col: str = None):
+        """Render trend analysis with forecasting"""
+        st.subheader("📈 Trend Analysis")
         
-        st.markdown("---")
-        st.markdown(
-            """
-            <div style='text-align: center; color: #666; font-size: 14px;'>
-                <p>FPL Analytics Dashboard | Built with ❤️ for FPL managers</p>
-                <p>Data provided by Fantasy Premier League API</p>
-            </div>
-            """,
-            unsafe_allow_html=True
+        if data.empty or x_col not in data.columns or y_col not in data.columns:
+            st.warning("Invalid data for trend analysis")
+            return
+        
+        fig = go.Figure()
+        
+        if group_col and group_col in data.columns:
+            # Group by category
+            for group in data[group_col].unique():
+                group_data = data[data[group_col] == group]
+                fig.add_trace(go.Scatter(
+                    x=group_data[x_col],
+                    y=group_data[y_col],
+                    mode='lines+markers',
+                    name=str(group),
+                    line=dict(width=3)
+                ))
+        else:
+            # Single line
+            fig.add_trace(go.Scatter(
+                x=data[x_col],
+                y=data[y_col],
+                mode='lines+markers',
+                name='Trend',
+                line=dict(width=3, color='rgb(102, 126, 234)')
+            ))
+        
+        # Add trend line
+        if len(data) > 1:
+            z = np.polyfit(range(len(data)), data[y_col], 1)
+            trend_line = np.poly1d(z)
+            
+            fig.add_trace(go.Scatter(
+                x=data[x_col],
+                y=trend_line(range(len(data))),
+                mode='lines',
+                name='Trend Line',
+                line=dict(dash='dash', color='red')
+            ))
+        
+        fig.update_layout(
+            title=f"{y_col.replace('_', ' ').title()} over {x_col.replace('_', ' ').title()}",
+            xaxis_title=x_col.replace('_', ' ').title(),
+            yaxis_title=y_col.replace('_', ' ').title(),
+            height=500
         )
-    
-    except ImportError:
-        print("Footer: FPL Analytics Dashboard")
-
-def apply_custom_css():
-    """Apply custom CSS styling"""
-    try:
-        import streamlit as st
         
-        st.markdown("""
-            <style>
-            .stMetric {
-                background-color: #f0f2f6;
-                border: 1px solid #e0e0e0;
-                padding: 1rem;
-                border-radius: 0.5rem;
-                margin: 0.5rem 0;
-            }
-            
-            .stAlert {
-                border-radius: 0.5rem;
-                margin: 1rem 0;
-            }
-            
-            .stExpander {
-                border: 1px solid #e0e0e0;
-                border-radius: 0.5rem;
-                margin: 0.5rem 0;
-            }
-            
-            .stDataFrame {
-                border: 1px solid #e0e0e0;
-                border-radius: 0.5rem;
-            }
-            
-            .main-header {
-                font-size: 2.5rem;
-                font-weight: bold;
-                color: #1f77b4;
-                text-align: center;
-                margin-bottom: 2rem;
-            }
-            
-            .metric-card {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                padding: 1rem;
-                border-radius: 0.5rem;
-                margin: 0.5rem;
-                text-align: center;
-            }
-            </style>
-        """, unsafe_allow_html=True)
+        st.plotly_chart(fig, use_container_width=True)
     
-    except ImportError:
-        pass
+    @staticmethod
+    def render_action_center(actions: List[Dict[str, Any]]):
+        """Render action center with recommended actions"""
+        st.subheader("🎯 Recommended Actions")
+        
+        priority_order = {'high': 1, 'medium': 2, 'low': 3}
+        sorted_actions = sorted(actions, key=lambda x: priority_order.get(x.get('priority', 'medium'), 2))
+        
+        for action in sorted_actions:
+            priority = action.get('priority', 'medium')
+            priority_colors = {
+                'high': '#dc3545',
+                'medium': '#ffc107', 
+                'low': '#28a745'
+            }
+            priority_icons = {
+                'high': '🔥',
+                'medium': '⚠️',
+                'low': '💡'
+            }
+            
+            color = priority_colors.get(priority, '#17a2b8')
+            icon = priority_icons.get(priority, '📋')
+            
+            with st.container():
+                st.markdown(f"""
+                <div style='padding: 1rem; margin: 0.5rem 0; border-left: 4px solid {color}; background-color: {color}15; border-radius: 0 8px 8px 0;'>
+                    <div style='display: flex; justify-content: space-between; align-items: center;'>
+                        <div>
+                            <strong>{icon} {action.get('title', 'Action Required')}</strong>
+                            <p style='margin: 0.5rem 0 0 0; opacity: 0.8;'>{action.get('description', '')}</p>
+                        </div>
+                        <div style='text-align: right;'>
+                            <small>Priority: {priority.title()}</small><br>
+                            <small>Impact: {action.get('impact', 'Unknown')}</small>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if action.get('show_button', False):
+                    if st.button(f"Execute: {action.get('button_text', 'Take Action')}", key=f"action_{hash(action.get('title', ''))}"):
+                        st.success(f"Action executed: {action.get('title')}")
+
+class InteractiveCharts:
+    """Interactive chart components with enhanced functionality"""
+    
+    @staticmethod
+    def create_performance_radar(player_data: Dict[str, float], categories: List[str], 
+                               title: str = "Player Performance Radar") -> go.Figure:
+        """Create interactive radar chart for player performance"""
+        fig = go.Figure()
+        
+        values = [player_data.get(cat, 0) for cat in categories]
+        
+        fig.add_trace(go.Scatterpolar(
+            r=values,
+            theta=categories,
+            fill='toself',
+            name=title,
+            line_color='rgb(102, 126, 234)',
+            fillcolor='rgba(102, 126, 234, 0.25)'
+        ))
+        
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 100]
+                )),
+            showlegend=False,
+            title=title,
+            height=500
+        )
+        
+        return fig
+    
+    @staticmethod
+    def create_fixture_difficulty_matrix(fixture_data: pd.DataFrame) -> go.Figure:
+        """Create interactive fixture difficulty matrix"""
+        if fixture_data.empty:
+            return go.Figure()
+        
+        # Pivot data for heatmap
+        pivot_data = fixture_data.pivot_table(
+            index='team_name',
+            columns='gameweek',
+            values='difficulty',
+            fill_value=3
+        )
+        
+        fig = go.Figure(data=go.Heatmap(
+            z=pivot_data.values,
+            x=pivot_data.columns,
+            y=pivot_data.index,
+            colorscale=[
+                [0, '#00FF87'],    # Very Easy
+                [0.25, '#01FF70'], # Easy  
+                [0.5, '#FFDC00'],  # Average
+                [0.75, '#FF851B'], # Hard
+                [1, '#FF4136']     # Very Hard
+            ],
+            zmin=1,
+            zmax=5,
+            hoverongaps=False,
+            hovertemplate='<b>%{y}</b><br>GW%{x}<br>Difficulty: %{z}<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title="Fixture Difficulty Matrix",
+            xaxis_title="Gameweek",
+            yaxis_title="Team",
+            height=600
+        )
+        
+        return fig
+    
+    @staticmethod
+    def create_points_projection(historical_data: pd.DataFrame, 
+                               projection_weeks: int = 5) -> go.Figure:
+        """Create points projection chart with confidence intervals"""
+        fig = go.Figure()
+        
+        if not historical_data.empty and 'gameweek' in historical_data.columns and 'points' in historical_data.columns:
+            # Historical data
+            fig.add_trace(go.Scatter(
+                x=historical_data['gameweek'],
+                y=historical_data['points'],
+                mode='lines+markers',
+                name='Historical Points',
+                line=dict(color='blue', width=3)
+            ))
+            
+            # Simple projection (in real implementation, use advanced forecasting)
+            last_gw = historical_data['gameweek'].max()
+            avg_points = historical_data['points'].tail(5).mean()
+            
+            projection_gws = list(range(last_gw + 1, last_gw + projection_weeks + 1))
+            projection_points = [avg_points] * projection_weeks
+            
+            # Add uncertainty bands
+            upper_bound = [p * 1.3 for p in projection_points]
+            lower_bound = [p * 0.7 for p in projection_points]
+            
+            # Projection line
+            fig.add_trace(go.Scatter(
+                x=projection_gws,
+                y=projection_points,
+                mode='lines+markers',
+                name='Projected Points',
+                line=dict(color='red', width=2, dash='dash')
+            ))
+            
+            # Confidence bands
+            fig.add_trace(go.Scatter(
+                x=projection_gws + projection_gws[::-1],
+                y=upper_bound + lower_bound[::-1],
+                fill='toself',
+                fillcolor='rgba(255,0,0,0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                name='Confidence Interval',
+                showlegend=False
+            ))
+        
+        fig.update_layout(
+            title="Points Projection with Confidence Intervals",
+            xaxis_title="Gameweek",
+            yaxis_title="Points",
+            height=400
+        )
+        
+        return fig
