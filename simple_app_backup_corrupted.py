@@ -1,26 +1,24 @@
+# Fix form and ownership data processing
+players_df['form'] = pd.to_numeric(players_df['form'], errors='coerce').fillna(0.0)
+players_df['selected_by_percent'] = pd.to_numeric(players_df['selected_by_percent'], errors='coerce').fillna(0.0)
+"""Create simple_app.py - completely self-contained
+Helper functions for fixture analysis
 """
-FPL Analytics Dashboard - Complete Self-Contained Application
-Comprehensive Fantasy Premier League analysis tool with fixture difficulty ratings,
-player analysis, team management, and AI-powered recommendations.
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-import requests
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import warnings
-import urllib3
-import logging
-import json
+warnings.filterwarnings('ignore')
+
+import requests
 from typing import List, Dict, Tuple, Any
 from datetime import datetime, timedelta
-
-# Suppress warnings
-warnings.filterwarnings('ignore')
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import json
+import logging
+import urllib3
 
 # Import components and utilities
 try:
@@ -28,7 +26,7 @@ try:
     from components.team_recommender import TeamRecommender
     from utils.logging_utils import FPLLogger
     from utils.data_manager import DataManager
-    from pages.my_team_page import MyTeamPage
+    from pages.my_team_page import MyTeamPage  # NEW: Import the enhanced MyTeamPage
     CONFIG_AVAILABLE = True
     print("✅ Infrastructure modules loaded successfully")
 except ImportError:
@@ -43,7 +41,7 @@ except ImportError:
     class DataManager:
         def __init__(self):
             pass
-    # Fallback implementations
+    # Fallback for MyTeamPage if import fails
     MyTeamPage = None
     CONFIG_AVAILABLE = False
 

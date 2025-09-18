@@ -1,1 +1,1 @@
-# Auto-generated during refactoring
+# Pages module initialization

@@ -1,29 +1,29 @@
 """
-Page Router - Handles navigation and page routing for the FPL Analytics App
+Page Router - Handles navigation and sidebar
 """
 import streamlit as st
-from typing import Dict, Any, Optional
+import pandas as pd
 
 
 class PageRouter:
-    """Handles page navigation and routing for the FPL Analytics App"""
+    """Handles page routing and navigation"""
     
     def __init__(self):
-        """Initialize the page router"""
         self.pages = {
-            "Dashboard": "🏠",
-            "Transfer Recommendations": "🔄",
-            "Captain Picks": "👑",
-            "Team Planning": "📋",
-            "Settings": "⚙️"
+            "🏠 Dashboard": "dashboard",
+            "👥 Player Analysis": "players", 
+            "🎯 Fixture Difficulty": "fixtures",
+            "👤 My FPL Team": "my_team",
+            "🤖 AI Recommendations": "ai_recommendations",
+            "⚽ Team Builder": "team_builder",
         }
     
-    def render_sidebar_navigation(self):
-        """Render the sidebar navigation menu"""
-        st.sidebar.markdown("## 🚀 FPL Analytics")
+    def render_sidebar(self):
+        """Render sidebar navigation and data controls"""
+        st.sidebar.title("⚽ FPL Analytics")
         st.sidebar.markdown("---")
         
-        # Navigation menu
+        # Navigation
         selected_page = st.sidebar.selectbox(
             "Navigate to:",
             list(self.pages.keys()),
@@ -32,49 +32,69 @@ class PageRouter:
         
         st.sidebar.markdown("---")
         
-        # Data status indicator
+        # Data status
         self._render_data_status()
         
-        return selected_page
+        # Data controls
+        self._render_data_controls()
+        
+        return self.pages[selected_page]
     
     def _render_data_status(self):
-        """Render data loading status in sidebar"""
-        if 'data_loaded' in st.session_state and st.session_state.data_loaded:
+        """Render data loading status"""
+        if st.session_state.get('data_loaded', False):
             st.sidebar.success("✅ Data Loaded")
+            if not st.session_state.get('players_df', pd.DataFrame()).empty:
+                player_count = len(st.session_state.players_df)
+                st.sidebar.info(f"📊 {player_count} players loaded")
         else:
-            st.sidebar.warning("⚠️ Data Not Loaded")
-            
-            if st.sidebar.button("🔄 Load FPL Data"):
-                self._trigger_data_load()
+            st.sidebar.warning("⚠️ No data loaded")
+        
+        # My FPL Team status
+        if st.session_state.get('my_team_loaded', False):
+            st.sidebar.success("✅ My Team Loaded")
+            if 'my_team_data' in st.session_state:
+                team_name = st.session_state.my_team_data.get('entry_name', 'Team')
+                st.sidebar.info(f"👤 {team_name}")
     
-    def _trigger_data_load(self):
-        """Trigger FPL data loading"""
-        try:
-            # Import here to avoid circular imports
-            from services.fpl_data_service import FPLDataService
-            
-            data_service = FPLDataService()
-            players_df, teams_df, fixtures_df, gameweek_info = data_service.load_fpl_data()
-            
-            if not players_df.empty:
-                data_service.cache_data(players_df, teams_df, fixtures_df, gameweek_info)
-                st.sidebar.success("✅ Data loaded successfully!")
-                st.rerun()
-            else:
-                st.sidebar.error("❌ Failed to load data")
+    def _render_data_controls(self):
+        """Render data loading controls"""
+        if st.sidebar.button("🔄 Refresh Data", type="primary"):
+            self._load_data()
+        
+        # Additional controls can be added here
+        if st.sidebar.button("🧹 Clear Cache"):
+            self._clear_cache()
+    
+    def _load_data(self):
+        """Load FPL data"""
+        with st.spinner("Loading FPL data..."):
+            try:
+                from services.fpl_data_service import FPLDataService
+                data_service = FPLDataService()
+                players_df, teams_df = data_service.load_fpl_data()
                 
-        except Exception as e:
-            st.sidebar.error(f"❌ Error loading data: {str(e)}")
+                if not players_df.empty:
+                    st.session_state.players_df = players_df
+                    st.session_state.teams_df = teams_df
+                    st.session_state.data_loaded = True
+                    st.sidebar.success("✅ Data refreshed successfully!")
+                else:
+                    st.sidebar.error("❌ Failed to load data")
+            except Exception as e:
+                st.sidebar.error(f"❌ Error loading data: {str(e)}")
     
-    def route_to_page(self, page_name: str):
-        """Route to the specified page"""
-        if page_name not in self.pages:
-            st.error(f"Page '{page_name}' not found")
-            return
+    def _clear_cache(self):
+        """Clear all cached data"""
+        keys_to_clear = [
+            'data_loaded', 'players_df', 'teams_df', 
+            'fdr_data_loaded', 'fixtures_df',
+            'my_team_loaded', 'my_team_data'
+        ]
         
-        # Set the current page in session state
-        st.session_state.current_page = page_name
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
         
-        # Page-specific routing logic can be added here
-        return page_name
+        st.sidebar.success("🧹 Cache cleared!")
 
