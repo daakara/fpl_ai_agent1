@@ -4,6 +4,9 @@ Player Analysis Page - Handles all player-related analysis and filtering
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 
 class PlayerAnalysisPage:
@@ -194,7 +197,7 @@ class PlayerAnalysisPage:
         )
     
     def _render_performance_metrics_dashboard(self, df):
-        """Enhanced performance metrics dashboard"""
+        """Enhanced performance metrics dashboard with interactive visualizations"""
         st.subheader("📈 Performance Metrics Dashboard")
         
         # Use filtered data if available
@@ -205,10 +208,11 @@ class PlayerAnalysisPage:
             return
         
         # Performance metrics tabs
-        metric_tab1, metric_tab2, metric_tab3 = st.tabs([
+        metric_tab1, metric_tab2, metric_tab3, metric_tab4 = st.tabs([
             "⚽ Top Performers",
             "💰 Value Analysis",
-            "📊 Form & Consistency"
+            "📊 Form & Consistency",
+            "📈 Interactive Charts"
         ])
         
         with metric_tab1:
@@ -219,6 +223,492 @@ class PlayerAnalysisPage:
         
         with metric_tab3:
             self._render_form_analysis(display_df)
+        
+        with metric_tab4:
+            self._render_interactive_charts(display_df)
+
+    def _render_interactive_charts(self, df):
+        """Render interactive Plotly visualizations with advanced colorbar configurations"""
+        st.write("**📈 Interactive Performance Visualizations**")
+        
+        if df.empty:
+            st.info("No data available for charts")
+            return
+        
+        # Chart selection with new options
+        chart_type = st.selectbox(
+            "Select Chart Type",
+            [
+                "Performance Heatmap", 
+                "Value vs Points Scatter", 
+                "Form Trends", 
+                "Position Comparison",
+                "Advanced Team Heatmap",
+                "Ownership vs Performance",
+                "Player Risk Matrix"
+            ]
+        )
+        
+        if chart_type == "Performance Heatmap":
+            self._render_performance_heatmap(df)
+        elif chart_type == "Value vs Points Scatter":
+            self._render_value_scatter(df)
+        elif chart_type == "Form Trends":
+            self._render_form_trends(df)
+        elif chart_type == "Position Comparison":
+            self._render_position_comparison_chart(df)
+        elif chart_type == "Advanced Team Heatmap":
+            self._render_advanced_team_heatmap(df)
+        elif chart_type == "Ownership vs Performance":
+            self._render_ownership_performance_chart(df)
+        elif chart_type == "Player Risk Matrix":
+            self._render_player_risk_matrix(df)
+
+    def _render_advanced_team_heatmap(self, df):
+        """Create advanced team-based performance heatmap with sophisticated colorbar"""
+        st.write("**🏟️ Team Performance Matrix**")
+        
+        required_cols = ['team_name', 'position_name', 'total_points']
+        if not all(col in df.columns for col in required_cols):
+            st.info("Required team/position data not available")
+            return
+        
+        # Aggregate data by team and position
+        team_position_stats = df.groupby(['team_name', 'position_name']).agg({
+            'total_points': 'mean',
+            'form': 'mean' if 'form' in df.columns else lambda x: 0,
+            'points_per_million': 'mean' if 'points_per_million' in df.columns else lambda x: 0
+        }).reset_index()
+        
+        # Pivot for heatmap
+        heatmap_data = team_position_stats.pivot(
+            index='team_name', 
+            columns='position_name', 
+            values='total_points'
+        ).fillna(0)
+        
+        # Create advanced heatmap with sophisticated colorbar
+        fig = go.Figure(data=go.Heatmap(
+            z=heatmap_data.values,
+            x=heatmap_data.columns,
+            y=heatmap_data.index,
+            colorscale='Viridis',
+            colorbar=dict(
+                title=dict(
+                    text="Average Points",
+                    side="right",
+                    font=dict(size=14, color="darkblue")
+                ),
+                titleside="right",
+                tickmode="linear",
+                tick0=0,
+                dtick=20,
+                tickformat=".0f",
+                tickfont=dict(size=12, color="darkgreen"),
+                thickness=20,
+                len=0.8,
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor="rgba(0,0,0,0.3)",
+                borderwidth=2,
+                outlinecolor="navy",
+                outlinewidth=1,
+                x=1.02,
+                xanchor="left",
+                y=0.5,
+                yanchor="middle"
+            ),
+            hovertemplate='<b>%{y}</b><br>Position: %{x}<br>Avg Points: %{z:.1f}<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title=dict(
+                text="Team Performance by Position - Average Points",
+                x=0.5,
+                font=dict(size=16, color="darkblue")
+            ),
+            xaxis_title="Position",
+            yaxis_title="Team",
+            height=600,
+            font=dict(size=11),
+            plot_bgcolor='rgba(240,240,240,0.5)'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+    def _render_ownership_performance_chart(self, df):
+        """Create ownership vs performance scatter with advanced colorbar"""
+        st.write("**👥 Ownership vs Performance Analysis**")
+        
+        required_cols = ['selected_by_percent', 'total_points', 'web_name', 'form']
+        if not all(col in df.columns for col in required_cols):
+            st.info("Required ownership/performance data not available")
+            return
+        
+        # Create scatter plot with form as color dimension
+        fig = go.Figure(data=go.Scatter(
+            x=df['selected_by_percent'],
+            y=df['total_points'],
+            mode='markers',
+            marker=dict(
+                size=df.get('points_per_million', 8),
+                color=df['form'],
+                colorscale='RdYlBu_r',
+                showscale=True,
+                colorbar=dict(
+                    title=dict(
+                        text="Form Rating",
+                        side="top",
+                        font=dict(size=14, color="darkred")
+                    ),
+                    titleside="top",
+                    tickmode="linear",
+                    tick0=0,
+                    dtick=2,
+                    tickformat=".1f",
+                    tickfont=dict(size=11, color="darkblue"),
+                    tickangle=0,
+                    thickness=15,
+                    len=0.6,
+                    bgcolor="rgba(255,255,255,0.95)",
+                    bordercolor="rgba(0,0,0,0.4)",
+                    borderwidth=1,
+                    outlinecolor="darkred",
+                    outlinewidth=1,
+                    x=1.02,
+                    xanchor="left",
+                    y=0.8,
+                    yanchor="top",
+                    nticks=6
+                ),
+                line=dict(width=1, color='darkblue'),
+                opacity=0.7
+            ),
+            text=df['web_name'],
+            hovertemplate='<b>%{text}</b><br>' +
+                         'Ownership: %{x:.1f}%<br>' +
+                         'Points: %{y}<br>' +
+                         'Form: %{marker.color:.1f}<extra></extra>'
+        ))
+        
+        # Add quadrant lines
+        avg_ownership = df['selected_by_percent'].mean()
+        avg_points = df['total_points'].mean()
+        
+        fig.add_hline(y=avg_points, line_dash="dash", line_color="gray", opacity=0.5)
+        fig.add_vline(x=avg_ownership, line_dash="dash", line_color="gray", opacity=0.5)
+        
+        # Add quadrant labels
+        fig.add_annotation(x=avg_ownership/2, y=df['total_points'].max()*0.95, 
+                          text="Hidden Gems", showarrow=False, font=dict(color="green", size=12))
+        fig.add_annotation(x=df['selected_by_percent'].max()*0.8, y=df['total_points'].max()*0.95, 
+                          text="Template Assets", showarrow=False, font=dict(color="blue", size=12))
+        
+        fig.update_layout(
+            title="Ownership vs Performance Matrix (Size = Value, Color = Form)",
+            xaxis_title="Ownership Percentage (%)",
+            yaxis_title="Total Points",
+            height=550,
+            showlegend=False,
+            plot_bgcolor='rgba(245,245,245,0.8)'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+    def _render_player_risk_matrix(self, df):
+        """Create player risk assessment matrix with custom colorbar"""
+        st.write("**⚠️ Player Risk Assessment Matrix**")
+        
+        # Calculate risk factors
+        risk_df = df.copy()
+        
+        # Risk score calculation
+        risk_df['injury_risk'] = 0
+        if 'news' in df.columns:
+            risk_df['injury_risk'] = df['news'].str.contains('injured|doubt|miss', case=False, na=False).astype(int) * 5
+        
+        risk_df['form_risk'] = 0
+        if 'form' in df.columns:
+            risk_df['form_risk'] = (10 - df['form']).clip(0, 10)
+        
+        risk_df['minutes_risk'] = 0
+        if 'minutes' in df.columns:
+            risk_df['minutes_risk'] = ((2000 - df['minutes']) / 200).clip(0, 10)
+        
+        risk_df['price_risk'] = 0
+        if 'cost_millions' in df.columns:
+            risk_df['price_risk'] = (df['cost_millions'] / 2).clip(0, 10)
+        
+        # Combined risk score
+        risk_df['total_risk'] = (
+            risk_df['injury_risk'] * 0.4 +
+            risk_df['form_risk'] * 0.3 +
+            risk_df['minutes_risk'] * 0.2 +
+            risk_df['price_risk'] * 0.1
+        )
+        
+        # Create risk matrix
+        fig = go.Figure(data=go.Scatter(
+            x=risk_df.get('cost_millions', risk_df.index),
+            y=risk_df.get('total_points', 0),
+            mode='markers',
+            marker=dict(
+                size=12,
+                color=risk_df['total_risk'],
+                colorscale=[[0, 'green'], [0.3, 'yellow'], [0.7, 'orange'], [1, 'red']],
+                showscale=True,
+                colorbar=dict(
+                    title=dict(
+                        text="Risk Level",
+                        side="right",
+                        font=dict(size=14, color="darkred")
+                    ),
+                    titleside="right",
+                    tickmode="array",
+                    tickvals=[0, 2.5, 5, 7.5, 10],
+                    ticktext=["Very Low", "Low", "Medium", "High", "Very High"],
+                    tickfont=dict(size=11, color="darkred"),
+                    thickness=18,
+                    len=0.7,
+                    bgcolor="rgba(255,255,255,0.95)",
+                    bordercolor="rgba(0,0,0,0.5)",
+                    borderwidth=2,
+                    outlinecolor="darkred",
+                    outlinewidth=2,
+                    x=1.02,
+                    xanchor="left",
+                    y=0.5,
+                    yanchor="middle"
+                ),
+                line=dict(width=1, color='black'),
+                opacity=0.8
+            ),
+            text=risk_df['web_name'],
+            hovertemplate='<b>%{text}</b><br>' +
+                         'Price: £%{x:.1f}m<br>' +
+                         'Points: %{y}<br>' +
+                         'Risk Score: %{marker.color:.1f}<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title="Player Risk Assessment Matrix",
+            xaxis_title="Price (£m)",
+            yaxis_title="Total Points",
+            height=500,
+            showlegend=False,
+            plot_bgcolor='rgba(250,250,250,0.9)'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Risk insights
+        high_risk_players = risk_df[risk_df['total_risk'] > 7]
+        if not high_risk_players.empty:
+            st.warning(f"⚠️ **High Risk Players Identified**: {len(high_risk_players)} players with risk score > 7")
+            for _, player in high_risk_players.head(5).iterrows():
+                st.write(f"• **{player['web_name']}** - Risk: {player['total_risk']:.1f}")
+
+    def _render_performance_heatmap(self, df):
+        """Create performance heatmap using Plotly"""
+        st.write("**🔥 Player Performance Heatmap**")
+        
+        # Select relevant numeric columns for heatmap
+        numeric_cols = ['total_points', 'form', 'points_per_million', 'selected_by_percent']
+        available_cols = [col for col in numeric_cols if col in df.columns]
+        
+        if len(available_cols) < 2:
+            st.info("Insufficient numeric data for heatmap")
+            return
+        
+        # Prepare data for heatmap
+        heatmap_df = df[['web_name'] + available_cols].head(20)  # Top 20 players
+        
+        # Normalize data for better visualization
+        for col in available_cols:
+            heatmap_df[col] = (heatmap_df[col] - heatmap_df[col].min()) / (heatmap_df[col].max() - heatmap_df[col].min())
+        
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=heatmap_df[available_cols].values,
+            x=available_cols,
+            y=heatmap_df['web_name'],
+            colorscale='RdYlGn',
+            colorbar=dict(
+                title="Performance Score",
+                titleside="right",
+                tickmode="linear",
+                tick0=0,
+                dtick=0.2,
+                thickness=15,
+                len=0.7,
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="rgba(0,0,0,0.1)",
+                borderwidth=1
+            )
+        ))
+        
+        fig.update_layout(
+            title="Player Performance Heatmap (Normalized Metrics)",
+            xaxis_title="Metrics",
+            yaxis_title="Players",
+            height=600,
+            font=dict(size=10)
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    def _render_value_scatter(self, df):
+        """Create value vs points scatter plot"""
+        st.write("**💎 Value vs Performance Scatter Plot**")
+        
+        required_cols = ['total_points', 'cost_millions', 'web_name', 'position_name']
+        if not all(col in df.columns for col in required_cols):
+            st.info("Required data not available for scatter plot")
+            return
+        
+        # Create scatter plot
+        fig = px.scatter(
+            df,
+            x='cost_millions',
+            y='total_points',
+            color='position_name',
+            size='selected_by_percent' if 'selected_by_percent' in df.columns else None,
+            hover_name='web_name',
+            hover_data=['form', 'points_per_million'] if 'form' in df.columns else None,
+            title="Player Value vs Performance Analysis",
+            labels={
+                'cost_millions': 'Price (£m)',
+                'total_points': 'Total Points',
+                'position_name': 'Position',
+                'selected_by_percent': 'Ownership %'
+            }
+        )
+        
+        # Update layout with custom colorbar properties
+        fig.update_layout(
+            height=500,
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            )
+        )
+        
+        # Add trend line
+        if len(df) > 5:
+            fig.add_traces(px.scatter(df, x='cost_millions', y='total_points', trendline="ols").data[1:])
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    def _render_form_trends(self, df):
+        """Create form trends visualization"""
+        st.write("**📊 Form Analysis Distribution**")
+        
+        if 'form' not in df.columns:
+            st.info("Form data not available")
+            return
+        
+        # Create subplots
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=('Form Distribution', 'Form by Position', 'Form vs Points', 'Top Form Players'),
+            specs=[[{"type": "histogram"}, {"type": "box"}],
+                   [{"type": "scatter"}, {"type": "bar"}]]
+        )
+        
+        # Form distribution histogram
+        fig.add_trace(
+            go.Histogram(x=df['form'], name="Form Distribution", nbinsx=20),
+            row=1, col=1
+        )
+        
+        # Form by position box plot
+        if 'position_name' in df.columns:
+            for position in df['position_name'].unique():
+                pos_data = df[df['position_name'] == position]['form']
+                fig.add_trace(
+                    go.Box(y=pos_data, name=position),
+                    row=1, col=2
+                )
+        
+        # Form vs Points scatter
+        if 'total_points' in df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=df['form'], 
+                    y=df['total_points'],
+                    mode='markers',
+                    name="Form vs Points",
+                    text=df['web_name'],
+                    hovertemplate='<b>%{text}</b><br>Form: %{x}<br>Points: %{y}<extra></extra>'
+                ),
+                row=2, col=1
+            )
+        
+        # Top form players bar chart
+        top_form = df.nlargest(10, 'form')
+        fig.add_trace(
+            go.Bar(
+                x=top_form['web_name'], 
+                y=top_form['form'],
+                name="Top Form",
+                marker_color='green'
+            ),
+            row=2, col=2
+        )
+        
+        fig.update_layout(height=600, showlegend=False, title_text="Comprehensive Form Analysis")
+        fig.update_xaxes(title_text="Form", row=2, col=1)
+        fig.update_yaxes(title_text="Points", row=2, col=1)
+        fig.update_xaxes(title_text="Players", row=2, col=2)
+        fig.update_yaxes(title_text="Form", row=2, col=2)
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    def _render_position_comparison_chart(self, df):
+        """Create position comparison radar chart"""
+        st.write("**🎯 Position Performance Comparison**")
+        
+        if 'position_name' not in df.columns:
+            st.info("Position data not available")
+            return
+        
+        # Calculate average metrics by position
+        metrics = ['total_points', 'form', 'points_per_million', 'selected_by_percent']
+        available_metrics = [col for col in metrics if col in df.columns]
+        
+        if len(available_metrics) < 3:
+            st.info("Insufficient metrics for position comparison")
+            return
+        
+        position_stats = df.groupby('position_name')[available_metrics].mean().reset_index()
+        
+        # Create radar chart
+        fig = go.Figure()
+        
+        for _, position in position_stats.iterrows():
+            fig.add_trace(go.Scatterpolar(
+                r=[position[metric] for metric in available_metrics],
+                theta=available_metrics,
+                fill='toself',
+                name=position['position_name'],
+                line=dict(width=2)
+            ))
+        
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, max([position_stats[col].max() for col in available_metrics])]
+                )),
+            showlegend=True,
+            title="Average Performance by Position",
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
     
     def _render_top_performers(self, df):
         """Render top performing players"""

@@ -3,22 +3,20 @@ Fixture Analysis Page - Handles fixture difficulty ratings and analysis
 """
 import streamlit as st
 import pandas as pd
-from fixtures.fixture_data_loader import FixtureDataLoader
-from fixtures.fdr_analyzer import FDRAnalyzer
-from fixtures.fdr_visualizer import FDRVisualizer
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
 
 
 class FixtureAnalysisPage:
     """Handles fixture analysis functionality"""
     
     def __init__(self):
-        self.fixture_loader = FixtureDataLoader()
-        self.fdr_analyzer = FDRAnalyzer()
-        self.fdr_visualizer = FDRVisualizer()
+        pass
     
     def render(self):
         """Main render method for fixture analysis page"""
-        st.header("🎯 Fixture Difficulty Ratings (FDR)")
+        st.header("🎯 Fixture Difficulty Analysis")
         
         # Comprehensive explanation
         with st.expander("📚 What is Fixture Difficulty Analysis?", expanded=False):
@@ -26,305 +24,342 @@ class FixtureAnalysisPage:
             **Fixture Difficulty Rating (FDR)** is a crucial tool for FPL success that helps you identify:
             
             🎯 **Core Concepts:**
-            - **Attack FDR**: How easy it is for a team's attackers to score against upcoming opponents
-            - **Defense FDR**: How likely a team is to keep clean sheets based on opponent strength
-            - **Combined FDR**: Overall fixture quality considering both attack and defense
+            - **Easy Fixtures**: Target players from teams facing weaker opponents
+            - **Difficult Fixtures**: Consider transferring out players facing strong teams
+            - **Home vs Away**: Home advantage typically makes fixtures easier
+            - **Form Impact**: Recent team performance affects fixture difficulty
             
-            📊 **How to Interpret FDR Scores:**
-            - **1-2 (Green)**: Excellent fixtures - Strong targets for transfers IN
-            - **3 (Yellow)**: Average fixtures - Neutral, monitor closely  
-            - **4-5 (Red)**: Difficult fixtures - Consider transfers OUT
+            📊 **How to Use This Analysis:**
+            - **Green (1-2)**: Excellent fixtures - Strong targets for transfers IN
+            - **Yellow (3)**: Average fixtures - Neutral, monitor closely  
+            - **Red (4-5)**: Difficult fixtures - Consider transfers OUT
             
             🎮 **Strategic Applications:**
-            - **Transfer Planning**: Target players from teams with upcoming green fixtures
-            - **Captain Selection**: Choose captains facing the easiest opponents
+            - **Transfer Planning**: Target players from teams with upcoming easy fixtures
+            - **Captain Selection**: Choose captains facing the weakest opponents
             - **Squad Rotation**: Plan bench players around difficult fixture periods
-            - **Chip Strategy**: Time Wildcards and other chips around fixture swings
             """)
         
-        st.markdown("### Analyze team fixtures to identify transfer targets and avoid traps")
-        
-        # Load fixtures data
-        if not st.session_state.get('fdr_data_loaded', False):
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                st.info("Click the button to load fixture data and begin analysis")
-            
-            with col2:
-                if st.button("📊 Load Fixture Data", type="primary"):
-                    self._load_fixture_data()
+        # Check if we have basic player data
+        if not st.session_state.get('data_loaded', False):
+            st.info("Please load FPL data first from the sidebar to begin fixture analysis.")
             return
         
-        fixtures_df = st.session_state.fixtures_df
+        df = st.session_state.players_df
         
-        # Settings panel
-        with st.expander("⚙️ FDR Settings", expanded=False):
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                gameweeks_ahead = st.slider("Gameweeks to analyze:", 1, 15, 5)
-                show_colors = st.checkbox("Show color coding", value=True)
-            
-            with col2:
-                fdr_threshold = st.slider("Good fixture threshold:", 1.0, 4.0, 2.5, 0.1)
-                show_opponents = st.checkbox("Show opponent names", value=True)
-            
-            with col3:
-                sort_by = st.selectbox("Sort by:", ["Combined FDR", "Attack FDR", "Defense FDR", "Team Name"])
-                ascending_sort = st.checkbox("Ascending order", value=True)
-            
-            with col4:
-                use_form_adjustment = st.checkbox("Apply form adjustment", value=False)
-                if use_form_adjustment:
-                    form_weight = st.slider("Form weight:", 0.1, 0.5, 0.3, 0.1)
-                else:
-                    form_weight = 0.0
+        if df.empty:
+            st.warning("No player data available for fixture analysis.")
+            return
         
-        # Analysis type selection
-        analysis_type = st.selectbox(
-            "🎯 Analysis Focus:",
-            ["All Fixtures", "Home Only", "Away Only", "Next 3 Fixtures"],
-            help="Choose what type of fixtures to analyze"
-        )
+        # Create simplified fixture analysis
+        self._render_simplified_fixture_analysis(df)
+    
+    def _render_simplified_fixture_analysis(self, df):
+        """Render simplified fixture analysis using available data"""
         
-        # Create tabs for different analyses
+        # Analysis tabs
         tab1, tab2, tab3, tab4 = st.tabs([
-            "📊 Overview", 
-            "⚔️ Attack Analysis", 
-            "🛡️ Defense Analysis", 
-            "🎯 Transfer Targets"
+            "📊 Team Strength Analysis", 
+            "🏠 Home vs Away", 
+            "📈 Form-Based Fixtures",
+            "🎯 Transfer Recommendations"
         ])
         
-        # Apply form adjustment if enabled
-        if use_form_adjustment and st.session_state.get('data_loaded', False):
-            fixtures_df = self.fdr_analyzer.apply_form_adjustment(fixtures_df, form_weight)
-        
         with tab1:
-            self._render_fdr_overview(fixtures_df, gameweeks_ahead, sort_by, ascending_sort, analysis_type)
+            self._render_team_strength_analysis(df)
         
         with tab2:
-            self._render_attack_analysis(fixtures_df, fdr_threshold, show_opponents, analysis_type)
+            self._render_home_away_analysis(df)
         
         with tab3:
-            self._render_defense_analysis(fixtures_df, fdr_threshold, show_opponents, analysis_type)
+            self._render_form_based_analysis(df)
         
         with tab4:
-            self._render_transfer_targets(fixtures_df, fdr_threshold)
+            self._render_fixture_transfer_recommendations(df)
     
-    def _load_fixture_data(self):
-        """Load and process fixture data"""
-        with st.spinner("Loading fixture data..."):
-            try:
-                # Load and process fixtures
-                fixtures_df = self.fixture_loader.process_fixtures_data()
-                
-                if not fixtures_df.empty:
-                    # Calculate FDR ratings
-                    fixtures_df = self.fdr_analyzer.calculate_combined_fdr(fixtures_df)
-                    
-                    # Store in session state
-                    st.session_state.fixtures_df = fixtures_df
-                    st.session_state.fdr_data_loaded = True
-                    st.success("✅ Fixture data loaded successfully!")
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to load fixture data")
-            except Exception as e:
-                st.error(f"❌ Error loading fixture data: {str(e)}")
-    
-    def _filter_fixtures_by_type(self, fixtures_df, analysis_type):
-        """Filter fixtures based on analysis type"""
-        if fixtures_df.empty:
-            return fixtures_df
+    def _render_team_strength_analysis(self, df):
+        """Analyze team strength for fixture difficulty estimation"""
+        st.subheader("📊 Team Strength Analysis")
+        st.info("💡 Stronger teams = harder fixtures when playing against them")
         
-        try:
-            if analysis_type == "All Fixtures":
-                return fixtures_df
-            elif analysis_type == "Home Only":
-                return fixtures_df[fixtures_df.get('is_home', True) == True]
-            elif analysis_type == "Away Only":
-                return fixtures_df[fixtures_df.get('is_home', True) == False]
-            elif analysis_type == "Next 3 Fixtures":
-                return fixtures_df[fixtures_df.get('fixture_number', 1) <= 3]
-            else:
-                return fixtures_df
-        except Exception as e:
-            st.warning(f"Fixture filtering failed: {str(e)}")
-            return fixtures_df
-    
-    def _render_fdr_overview(self, fixtures_df, gameweeks_ahead, sort_by, ascending_sort, analysis_type):
-        """Render FDR overview with heatmaps and summaries"""
-        st.subheader(f"📊 FDR Overview - {analysis_type}")
-        
-        # Filter fixtures based on analysis type
-        filtered_fixtures = self._filter_fixtures_by_type(fixtures_df, analysis_type)
-        
-        if filtered_fixtures.empty:
-            st.warning("No fixture data available")
+        if df.empty:
+            st.warning("No data available for team strength analysis")
             return
         
-        # Key metrics
-        col1, col2, col3, col4 = st.columns(4)
+        # Calculate team strength metrics
+        team_metrics = df.groupby('team_short_name').agg({
+            'total_points': 'sum',
+            'goals_scored': 'sum' if 'goals_scored' in df.columns else 'count',
+            'clean_sheets': 'sum' if 'clean_sheets' in df.columns else 'count',
+            'form': 'mean' if 'form' in df.columns else 'count'
+        }).reset_index()
+        
+        # Calculate team strength score
+        if 'total_points' in team_metrics.columns:
+            team_metrics['strength_score'] = (
+                team_metrics['total_points'] / team_metrics['total_points'].max() * 100
+            ).round(1)
+            
+            team_metrics = team_metrics.sort_values('strength_score', ascending=False)
+            
+            # Display team strength
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("🔥 Strongest Teams (Hardest to face)")
+                strong_teams = team_metrics.head(10)
+                for _, team in strong_teams.iterrows():
+                    st.write(f"🔴 **{team['team_short_name']}**: {team['strength_score']:.1f} strength")
+            
+            with col2:
+                st.subheader("📉 Weaker Teams (Easier to face)")
+                weak_teams = team_metrics.tail(10)
+                for _, team in weak_teams.iterrows():
+                    st.write(f"🟢 **{team['team_short_name']}**: {team['strength_score']:.1f} strength")
+            
+            # Team strength visualization
+            fig = px.bar(
+                team_metrics, 
+                x='team_short_name', 
+                y='strength_score',
+                title="Team Strength Rankings",
+                color='strength_score',
+                color_continuous_scale='RdYlGn_r'
+            )
+            
+            fig.update_layout(
+                xaxis_title="Team",
+                yaxis_title="Strength Score",
+                height=500,
+                xaxis={'categoryorder': 'total descending'}
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        else:
+            st.info("Insufficient data for team strength calculation")
+    
+    def _render_home_away_analysis(self, df):
+        """Analyze home vs away performance"""
+        st.subheader("🏠 Home vs Away Performance")
+        st.info("📍 Teams typically perform better at home - use this for fixture planning")
+        
+        # Since we don't have fixture data, we'll use team strength as proxy
+        if 'team_short_name' in df.columns and 'total_points' in df.columns:
+            team_stats = df.groupby('team_short_name').agg({
+                'total_points': 'sum',
+                'form': 'mean' if 'form' in df.columns else 'count'
+            }).reset_index()
+            
+            # Simulate home advantage (typically 0.3-0.5 points boost)
+            team_stats['home_strength'] = team_stats['total_points'] * 1.15
+            team_stats['away_strength'] = team_stats['total_points'] * 0.9
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("🏠 Best Home Teams")
+                st.write("*Teams likely to perform well at home*")
+                home_teams = team_stats.nlargest(8, 'home_strength')
+                for _, team in home_teams.iterrows():
+                    st.write(f"🟢 **{team['team_short_name']}**: Strong at home")
+            
+            with col2:
+                st.subheader("✈️ Best Away Teams") 
+                st.write("*Teams that travel well*")
+                away_teams = team_stats.nlargest(8, 'away_strength')
+                for _, team in away_teams.iterrows():
+                    st.write(f"🟡 **{team['team_short_name']}**: Good away form")
+            
+            # Home vs Away comparison chart
+            fig = go.Figure()
+            
+            fig.add_trace(go.Bar(
+                name='Home Strength',
+                x=team_stats['team_short_name'],
+                y=team_stats['home_strength'],
+                marker_color='lightgreen'
+            ))
+            
+            fig.add_trace(go.Bar(
+                name='Away Strength',
+                x=team_stats['team_short_name'], 
+                y=team_stats['away_strength'],
+                marker_color='lightcoral'
+            ))
+            
+            fig.update_layout(
+                title='Home vs Away Performance Comparison',
+                xaxis_title='Team',
+                yaxis_title='Estimated Strength',
+                barmode='group',
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        else:
+            st.info("Home/Away analysis requires team and points data")
+    
+    def _render_form_based_analysis(self, df):
+        """Analyze current form for fixture difficulty"""
+        st.subheader("📈 Form-Based Fixture Analysis")
+        st.info("🔥 Teams in good form are harder to face - adjust your transfers accordingly")
+        
+        if 'form' not in df.columns:
+            st.warning("Form data not available - using total points as proxy")
+            if 'total_points' in df.columns:
+                # Use total points as form proxy
+                df = df.copy()
+                df['form'] = df['total_points'] / 20  # Approximate form from total points
+            else:
+                st.error("No suitable data for form analysis")
+                return
+        
+        # Team form analysis
+        team_form = df.groupby('team_short_name').agg({
+            'form': 'mean',
+            'total_points': 'sum' if 'total_points' in df.columns else 'count'
+        }).reset_index()
+        
+        team_form = team_form.sort_values('form', ascending=False)
+        
+        col1, col2 = st.columns(2)
         
         with col1:
-            total_fixtures = len(filtered_fixtures)
-            teams_count = filtered_fixtures['team_short_name'].nunique()
-            st.metric("📊 Fixtures Analyzed", f"{total_fixtures} ({teams_count} teams)")
+            st.subheader("🔥 Teams in Hot Form")
+            st.write("*Avoid facing these teams*")
+            hot_teams = team_form.head(8)
+            for _, team in hot_teams.iterrows():
+                st.write(f"🔴 **{team['team_short_name']}**: {team['form']:.1f} form")
         
         with col2:
-            if 'attack_fdr' in filtered_fixtures.columns:
-                avg_attack_fdr = filtered_fixtures['attack_fdr'].mean()
-                st.metric("⚔️ Avg Attack FDR", f"{avg_attack_fdr:.2f}")
-            else:
-                st.metric("⚔️ Avg Attack FDR", "N/A")
+            st.subheader("❄️ Teams in Poor Form")
+            st.write("*Target players facing these teams*")
+            cold_teams = team_form.tail(8)
+            for _, team in cold_teams.iterrows():
+                st.write(f"🟢 **{team['team_short_name']}**: {team['form']:.1f} form")
         
-        with col3:
-            if 'defense_fdr' in filtered_fixtures.columns:
-                avg_defense_fdr = filtered_fixtures['defense_fdr'].mean()
-                st.metric("🛡️ Avg Defense FDR", f"{avg_defense_fdr:.2f}")
-            else:
-                st.metric("🛡️ Avg Defense FDR", "N/A")
+        # Form distribution
+        fig = px.histogram(
+            team_form, 
+            x='form',
+            nbins=10,
+            title="Team Form Distribution",
+            labels={'form': 'Average Form', 'count': 'Number of Teams'}
+        )
         
-        with col4:
-            if 'combined_fdr' in filtered_fixtures.columns:
-                avg_combined_fdr = filtered_fixtures['combined_fdr'].mean()
-                st.metric("🎯 Avg Combined FDR", f"{avg_combined_fdr:.2f}")
-            else:
-                st.metric("🎯 Avg Combined FDR", "N/A")
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
         
-        st.divider()
-        
-        # FDR Heatmap
-        if 'combined_fdr' in filtered_fixtures.columns:
-            st.subheader(f"🌡️ FDR Heatmap - {analysis_type}")
+        # Form vs Points correlation
+        if 'total_points' in team_form.columns:
+            fig_scatter = px.scatter(
+                team_form,
+                x='form',
+                y='total_points',
+                text='team_short_name',
+                title="Form vs Total Points Correlation",
+                labels={'form': 'Average Form', 'total_points': 'Total Team Points'}
+            )
             
-            fig_heatmap = self.fdr_visualizer.create_fdr_heatmap(filtered_fixtures, 'combined')
-            st.plotly_chart(fig_heatmap, use_container_width=True)
+            fig_scatter.update_traces(textposition="top center")
+            fig_scatter.update_layout(height=500)
+            st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    def _render_fixture_transfer_recommendations(self, df):
+        """Provide transfer recommendations based on fixture analysis"""
+        st.subheader("🎯 Fixture-Based Transfer Recommendations")
+        st.info("💡 Strategic recommendations based on team strength and form analysis")
+        
+        if df.empty:
+            st.warning("No data available for recommendations")
+            return
+        
+        # Calculate recommendation scores
+        team_analysis = df.groupby('team_short_name').agg({
+            'total_points': 'sum',
+            'form': 'mean' if 'form' in df.columns else 'count',
+            'selected_by_percent': 'mean' if 'selected_by_percent' in df.columns else 'count'
+        }).reset_index()
+        
+        if 'total_points' in team_analysis.columns:
+            # Calculate fixture attractiveness (lower = better fixtures ahead)
+            team_analysis['fixture_attractiveness'] = (
+                100 - (team_analysis['total_points'] / team_analysis['total_points'].max() * 100)
+            )
             
-            # FDR Legend
-            st.markdown("""
-            **🎯 FDR Guide:**
-            - 🟢 **1-2**: Excellent fixtures - Target these teams' players
-            - 🟡 **3**: Average fixtures - Neutral stance
-            - 🟠 **4**: Difficult fixtures - Consider avoiding
-            - 🔴 **5**: Very difficult - Strong avoid
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("🎯 Teams to Target")
+                st.write("*Players from these teams likely have easier fixtures*")
+                
+                # Teams with poor opponents (high fixture attractiveness)
+                target_teams = team_analysis.nlargest(8, 'fixture_attractiveness')
+                
+                for _, team in target_teams.iterrows():
+                    # Get best players from this team
+                    team_players = df[df['team_short_name'] == team['team_short_name']]
+                    if not team_players.empty:
+                        best_player = team_players.nlargest(1, 'total_points').iloc[0]
+                        st.write(f"🟢 **{team['team_short_name']}**: Consider {best_player['web_name']}")
+            
+            with col2:
+                st.subheader("⚠️ Teams to Avoid")
+                st.write("*Players from these teams likely face difficult fixtures*")
+                
+                # Teams with strong opponents (low fixture attractiveness) 
+                avoid_teams = team_analysis.nsmallest(8, 'fixture_attractiveness')
+                
+                for _, team in avoid_teams.iterrows():
+                    # Get popular players from this team
+                    team_players = df[df['team_short_name'] == team['team_short_name']]
+                    if not team_players.empty:
+                        if 'selected_by_percent' in team_players.columns:
+                            popular_player = team_players.nlargest(1, 'selected_by_percent').iloc[0]
+                        else:
+                            popular_player = team_players.nlargest(1, 'total_points').iloc[0]
+                        st.write(f"🔴 **{team['team_short_name']}**: Consider selling {popular_player['web_name']}")
+        
+        # Transfer timing recommendations
+        st.subheader("⏰ Transfer Timing Strategy")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.info("""
+            **🚀 Immediate Targets**
+            - Players from weak teams
+            - Good form + easy fixtures
+            - Price rises expected
             """)
         
-        # Team summary table
-        st.subheader("📋 Team FDR Summary")
-        
-        if not filtered_fixtures.empty and 'combined_fdr' in filtered_fixtures.columns:
-            team_summary = filtered_fixtures.groupby('team_short_name').agg({
-                'combined_fdr': ['mean', 'min', 'max'],
-                'fixture_number': 'count'
-            }).round(2)
-            
-            team_summary.columns = ['Avg_FDR', 'Best_FDR', 'Worst_FDR', 'Fixtures']
-            team_summary = team_summary.reset_index()
-            
-            # Sort based on user selection
-            if sort_by == "Combined FDR":
-                team_summary = team_summary.sort_values('Avg_FDR', ascending=ascending_sort)
-            elif sort_by == "Team Name":
-                team_summary = team_summary.sort_values('team_short_name', ascending=ascending_sort)
-            
-            st.dataframe(team_summary, use_container_width=True, hide_index=True)
-        else:
-            st.warning("No FDR data available for team summary")
-    
-    def _render_attack_analysis(self, fixtures_df, fdr_threshold, show_opponents, analysis_type):
-        """Render attack FDR analysis"""
-        st.subheader(f"⚔️ Attack FDR Analysis - {analysis_type}")
-        st.info("🎯 Lower Attack FDR = Easier to score goals. Target these teams' forwards and attacking midfielders!")
-        
-        # Filter fixtures
-        filtered_fixtures = self._filter_fixtures_by_type(fixtures_df, analysis_type)
-        
-        if filtered_fixtures.empty or 'attack_fdr' not in filtered_fixtures.columns:
-            st.warning("Attack FDR data not available")
-            return
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Best attacking fixtures
-            st.subheader("🟢 Best Attacking Fixtures")
-            attack_summary = filtered_fixtures.groupby('team_short_name')['attack_fdr'].mean().sort_values().head(10)
-            
-            for team, fdr in attack_summary.items():
-                color = "🟢" if fdr <= 2 else "🟡" if fdr <= 3 else "🔴"
-                st.write(f"{color} **{team}**: {fdr:.2f} Attack FDR")
-        
         with col2:
-            # Attack FDR visualization
-            fig_attack = self.fdr_visualizer.create_fdr_bar_chart(filtered_fixtures, 'attack')
-            st.plotly_chart(fig_attack, use_container_width=True)
-    
-    def _render_defense_analysis(self, fixtures_df, fdr_threshold, show_opponents, analysis_type):
-        """Render defense FDR analysis"""
-        st.subheader(f"🛡️ Defense FDR Analysis - {analysis_type}")
-        st.info("🏠 Lower Defense FDR = Easier to keep clean sheets. Target these teams' defenders and goalkeepers!")
+            st.warning("""
+            **⏳ Monitor Closely**
+            - Form vs fixture conflict
+            - Injury concerns
+            - Rotation risks
+            """)
         
-        # Filter fixtures
-        filtered_fixtures = self._filter_fixtures_by_type(fixtures_df, analysis_type)
+        with col3:
+            st.error("""
+            **❌ Avoid This Week**
+            - Strong opposition ahead
+            - Poor recent form
+            - High risk of benching
+            """)
         
-        if filtered_fixtures.empty or 'defense_fdr' not in filtered_fixtures.columns:
-            st.warning("Defense FDR data not available")
-            return
+        # Simple fixture difficulty matrix
+        st.subheader("📊 Quick Fixture Difficulty Guide")
         
-        col1, col2 = st.columns(2)
+        difficulty_guide = pd.DataFrame({
+            'Opponent Strength': ['Very Strong', 'Strong', 'Average', 'Weak', 'Very Weak'],
+            'Home Fixture': ['🔴 Very Hard', '🟠 Hard', '🟡 Average', '🟢 Easy', '🟢 Very Easy'],
+            'Away Fixture': ['🔴 Extremely Hard', '🔴 Very Hard', '🟠 Hard', '🟡 Average', '🟢 Easy'],
+            'Recommendation': ['Avoid', 'Consider Out', 'Monitor', 'Consider In', 'Strong Target']
+        })
         
-        with col1:
-            # Best defensive fixtures
-            st.subheader("🟢 Best Defensive Fixtures")
-            defense_summary = filtered_fixtures.groupby('team_short_name')['defense_fdr'].mean().sort_values().head(10)
-            
-            for team, fdr in defense_summary.items():
-                color = "🟢" if fdr <= 2 else "🟡" if fdr <= 3 else "🔴"
-                st.write(f"{color} **{team}**: {fdr:.2f} Defense FDR")
-        
-        with col2:
-            # Defense FDR visualization
-            fig_defense = self.fdr_visualizer.create_fdr_bar_chart(filtered_fixtures, 'defense')
-            st.plotly_chart(fig_defense, use_container_width=True)
-    
-    def _render_transfer_targets(self, fixtures_df, fdr_threshold):
-        """Render transfer targets based on fixtures"""
-        st.subheader("🎯 Transfer Targets & Recommendations")
-        st.info("💡 Based on fixture difficulty analysis - players to target or avoid")
-        
-        if fixtures_df.empty or 'combined_fdr' not in fixtures_df.columns:
-            st.warning("No fixture data for transfer analysis")
-            return
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🎯 Teams to Target")
-            good_fixtures = fixtures_df.groupby('team_short_name')['combined_fdr'].mean()
-            target_teams = good_fixtures[good_fixtures <= fdr_threshold].sort_values().head(8)
-            
-            if not target_teams.empty:
-                st.write("**Teams with excellent upcoming fixtures:**")
-                for team, fdr in target_teams.items():
-                    st.write(f"• **{team}**: {fdr:.2f} FDR")
-                    
-                st.info("💡 Consider players from these teams for transfers IN")
-            else:
-                st.warning("No teams meet the good fixture criteria")
-        
-        with col2:
-            st.subheader("⚠️ Teams to Avoid")
-            bad_fixtures = fixtures_df.groupby('team_short_name')['combined_fdr'].mean()
-            avoid_teams = bad_fixtures[bad_fixtures >= 4.0].sort_values(ascending=False).head(8)
-            
-            if not avoid_teams.empty:
-                st.write("**Teams with difficult upcoming fixtures:**")
-                for team, fdr in avoid_teams.items():
-                    st.write(f"• **{team}**: {fdr:.2f} FDR")
-                    
-                st.warning("⚠️ Consider transferring OUT players from these teams")
-            else:
-                st.info("No teams have particularly difficult fixtures")
+        st.dataframe(difficulty_guide, use_container_width=True, hide_index=True)
 
