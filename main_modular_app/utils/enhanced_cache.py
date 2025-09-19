@@ -1,319 +1,202 @@
 """
-Enhanced Performance Cache Manager
-Multi-tier caching with memory and disk persistence for optimal performance
+Enhanced Cache Manager with Performance Optimization
 """
-
-import sqlite3
-import pickle
-import json
-import time
+import streamlit as st
+import pandas as pd
 import hashlib
-from typing import Any, Optional, Dict, List
-from pathlib import Path
-from threading import Lock
-from functools import wraps
-import logging
-from config.enhanced_app_config import get_config
-
-logger = logging.getLogger(__name__)
-
-class MemoryCache:
-    """In-memory cache with LRU eviction"""
-    
-    def __init__(self, max_size: int = 1000):
-        self.max_size = max_size
-        self.cache: Dict[str, Dict[str, Any]] = {}
-        self.access_order: List[str] = []
-        self.lock = Lock()
-    
-    def get(self, key: str) -> Optional[Any]:
-        with self.lock:
-            if key in self.cache:
-                # Move to end (most recently used)
-                self.access_order.remove(key)
-                self.access_order.append(key)
-                
-                # Check expiration
-                entry = self.cache[key]
-                if time.time() < entry['expires_at']:
-                    return entry['data']
-                else:
-                    del self.cache[key]
-                    self.access_order.remove(key)
-            return None
-    
-    def set(self, key: str, value: Any, ttl_seconds: int = 300):
-        with self.lock:
-            # Remove if exists
-            if key in self.cache:
-                self.access_order.remove(key)
-            
-            # Add new entry
-            self.cache[key] = {
-                'data': value,
-                'expires_at': time.time() + ttl_seconds,
-                'created_at': time.time()
-            }
-            self.access_order.append(key)
-            
-            # Evict if necessary
-            while len(self.cache) > self.max_size:
-                oldest_key = self.access_order.pop(0)
-                del self.cache[oldest_key]
-    
-    def delete(self, key: str):
-        with self.lock:
-            if key in self.cache:
-                del self.cache[key]
-                self.access_order.remove(key)
-    
-    def clear(self):
-        with self.lock:
-            self.cache.clear()
-            self.access_order.clear()
-    
-    def size(self) -> int:
-        return len(self.cache)
-
-class DiskCache:
-    """Persistent disk cache using SQLite"""
-    
-    def __init__(self, cache_dir: str = "fpl_cache"):
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
-        self.db_path = self.cache_dir / "cache.db"
-        self.lock = Lock()
-        self._init_db()
-    
-    def _init_db(self):
-        """Initialize the cache database"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS cache_entries (
-                    key TEXT PRIMARY KEY,
-                    data BLOB,
-                    expires_at REAL,
-                    created_at REAL,
-                    access_count INTEGER DEFAULT 0,
-                    size_bytes INTEGER
-                )
-            ''')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_expires_at ON cache_entries(expires_at)')
-    
-    def get(self, key: str) -> Optional[Any]:
-        with self.lock:
-            try:
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.execute(
-                        'SELECT data, expires_at FROM cache_entries WHERE key = ?',
-                        (key,)
-                    )
-                    row = cursor.fetchone()
-                    
-                    if row:
-                        data_blob, expires_at = row
-                        if time.time() < expires_at:
-                            # Update access count
-                            conn.execute(
-                                'UPDATE cache_entries SET access_count = access_count + 1 WHERE key = ?',
-                                (key,)
-                            )
-                            return pickle.loads(data_blob)
-                        else:
-                            # Expired, delete
-                            conn.execute('DELETE FROM cache_entries WHERE key = ?', (key,))
-                
-                return None
-            except Exception as e:
-                logger.error(f"Error reading from disk cache: {e}")
-                return None
-    
-    def set(self, key: str, value: Any, ttl_seconds: int = 300):
-        with self.lock:
-            try:
-                data_blob = pickle.dumps(value)
-                size_bytes = len(data_blob)
-                expires_at = time.time() + ttl_seconds
-                created_at = time.time()
-                
-                with sqlite3.connect(self.db_path) as conn:
-                    conn.execute('''
-                        INSERT OR REPLACE INTO cache_entries 
-                        (key, data, expires_at, created_at, access_count, size_bytes)
-                        VALUES (?, ?, ?, ?, 0, ?)
-                    ''', (key, data_blob, expires_at, created_at, size_bytes))
-                
-            except Exception as e:
-                logger.error(f"Error writing to disk cache: {e}")
-    
-    def delete(self, key: str):
-        with self.lock:
-            try:
-                with sqlite3.connect(self.db_path) as conn:
-                    conn.execute('DELETE FROM cache_entries WHERE key = ?', (key,))
-            except Exception as e:
-                logger.error(f"Error deleting from disk cache: {e}")
-    
-    def clear_expired(self):
-        """Remove expired entries"""
-        with self.lock:
-            try:
-                with sqlite3.connect(self.db_path) as conn:
-                    conn.execute('DELETE FROM cache_entries WHERE expires_at < ?', (time.time(),))
-            except Exception as e:
-                logger.error(f"Error clearing expired entries: {e}")
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get cache statistics"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute('''
-                    SELECT 
-                        COUNT(*) as total_entries,
-                        SUM(size_bytes) as total_size,
-                        AVG(access_count) as avg_access_count,
-                        COUNT(CASE WHEN expires_at > ? THEN 1 END) as valid_entries
-                    FROM cache_entries
-                ''', (time.time(),))
-                
-                row = cursor.fetchone()
-                return {
-                    'total_entries': row[0] or 0,
-                    'total_size_mb': (row[1] or 0) / (1024 * 1024),
-                    'avg_access_count': row[2] or 0,
-                    'valid_entries': row[3] or 0
-                }
-        except Exception as e:
-            logger.error(f"Error getting cache stats: {e}")
-            return {}
+import pickle
+import time
+from typing import Any, Optional, Callable
+from datetime import datetime, timedelta
+import os
 
 class EnhancedCacheManager:
-    """Multi-tier cache manager with memory and disk caching"""
+    """Advanced caching with TTL, size limits, and performance monitoring"""
     
-    def __init__(self):
-        config = get_config()
-        self.memory_cache = MemoryCache(config.cache.max_size) if config.cache.use_memory_cache else None
-        self.disk_cache = DiskCache(config.cache.cache_dir) if config.cache.use_disk_cache else None
-        self.enabled = config.cache.enabled
-        self.default_ttl = config.cache.ttl_seconds
-    
-    def _generate_key(self, prefix: str, *args, **kwargs) -> str:
-        """Generate a unique cache key"""
-        key_data = f"{prefix}:{str(args)}:{str(sorted(kwargs.items()))}"
-        return hashlib.md5(key_data.encode()).hexdigest()
-    
-    def get(self, key: str, cache_type: str = "default") -> Optional[Any]:
-        """Get value from cache (memory first, then disk)"""
-        if not self.enabled:
-            return None
-        
-        # Try memory cache first
-        if self.memory_cache:
-            value = self.memory_cache.get(key)
-            if value is not None:
-                return value
-        
-        # Try disk cache
-        if self.disk_cache:
-            value = self.disk_cache.get(key)
-            if value is not None:
-                # Warm memory cache
-                if self.memory_cache:
-                    config = get_config()
-                    ttl = config.get_cache_ttl(cache_type)
-                    self.memory_cache.set(key, value, ttl)
-                return value
-        
-        return None
-    
-    def set(self, key: str, value: Any, cache_type: str = "default"):
-        """Set value in both memory and disk cache"""
-        if not self.enabled:
-            return
-        
-        config = get_config()
-        ttl = config.get_cache_ttl(cache_type)
-        
-        # Set in memory cache
-        if self.memory_cache:
-            self.memory_cache.set(key, value, ttl)
-        
-        # Set in disk cache
-        if self.disk_cache:
-            self.disk_cache.set(key, value, ttl)
-    
-    def delete(self, key: str):
-        """Delete from both caches"""
-        if self.memory_cache:
-            self.memory_cache.delete(key)
-        if self.disk_cache:
-            self.disk_cache.delete(key)
-    
-    def clear(self, cache_type: Optional[str] = None):
-        """Clear cache(s)"""
-        if cache_type is None:
-            # Clear all
-            if self.memory_cache:
-                self.memory_cache.clear()
-            if self.disk_cache:
-                self.disk_cache.clear_expired()
-    
-    def get_cache_key(self, prefix: str, *args, **kwargs) -> str:
-        """Public method to generate cache keys"""
-        return self._generate_key(prefix, *args, **kwargs)
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get comprehensive cache statistics"""
-        stats = {
-            'enabled': self.enabled,
-            'memory_cache': {},
-            'disk_cache': {}
+    def __init__(self, max_size_mb: int = 100, default_ttl: int = 3600):
+        self.max_size_mb = max_size_mb
+        self.default_ttl = default_ttl
+        self.cache_dir = "cache"
+        self.metrics = {
+            'hits': 0,
+            'misses': 0,
+            'total_requests': 0,
+            'cache_size_mb': 0
         }
         
-        if self.memory_cache:
-            stats['memory_cache'] = {
-                'size': self.memory_cache.size(),
-                'max_size': self.memory_cache.max_size
+        # Ensure cache directory exists
+        os.makedirs(self.cache_dir, exist_ok=True)
+    
+    def get_cache_key(self, *args, **kwargs) -> str:
+        """Generate unique cache key from arguments"""
+        key_string = f"{args}_{kwargs}"
+        return hashlib.md5(key_string.encode()).hexdigest()
+    
+    def get(self, key: str) -> Optional[Any]:
+        """Get item from cache with TTL check"""
+        try:
+            cache_file = os.path.join(self.cache_dir, f"{key}.cache")
+            
+            if not os.path.exists(cache_file):
+                self.metrics['misses'] += 1
+                return None
+            
+            with open(cache_file, 'rb') as f:
+                cache_data = pickle.load(f)
+            
+            # Check TTL
+            if datetime.now() > cache_data['expires']:
+                os.remove(cache_file)
+                self.metrics['misses'] += 1
+                return None
+            
+            self.metrics['hits'] += 1
+            return cache_data['data']
+            
+        except Exception:
+            self.metrics['misses'] += 1
+            return None
+        finally:
+            self.metrics['total_requests'] += 1
+    
+    def set(self, key: str, data: Any, ttl: Optional[int] = None) -> bool:
+        """Set item in cache with TTL"""
+        try:
+            ttl = ttl or self.default_ttl
+            expires = datetime.now() + timedelta(seconds=ttl)
+            
+            cache_data = {
+                'data': data,
+                'expires': expires,
+                'created': datetime.now()
             }
+            
+            cache_file = os.path.join(self.cache_dir, f"{key}.cache")
+            
+            with open(cache_file, 'wb') as f:
+                pickle.dump(cache_data, f)
+            
+            self._cleanup_if_needed()
+            return True
+            
+        except Exception:
+            return False
+    
+    def _cleanup_if_needed(self):
+        """Clean up cache if size exceeds limit"""
+        total_size = sum(
+            os.path.getsize(os.path.join(self.cache_dir, f))
+            for f in os.listdir(self.cache_dir)
+            if f.endswith('.cache')
+        )
         
-        if self.disk_cache:
-            stats['disk_cache'] = self.disk_cache.get_stats()
+        self.metrics['cache_size_mb'] = total_size / (1024 * 1024)
         
-        return stats
+        if self.metrics['cache_size_mb'] > self.max_size_mb:
+            # Remove oldest files
+            cache_files = [
+                os.path.join(self.cache_dir, f)
+                for f in os.listdir(self.cache_dir)
+                if f.endswith('.cache')
+            ]
+            
+            cache_files.sort(key=os.path.getctime)
+            
+            # Remove oldest 25% of files
+            files_to_remove = len(cache_files) // 4
+            for file_path in cache_files[:files_to_remove]:
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+    
+    def get_metrics(self) -> dict:
+        """Get cache performance metrics"""
+        hit_rate = (self.metrics['hits'] / max(self.metrics['total_requests'], 1)) * 100
+        return {
+            **self.metrics,
+            'hit_rate_percent': round(hit_rate, 2)
+        }
+    
+    def clear_cache(self):
+        """Clear all cache files"""
+        try:
+            for file in os.listdir(self.cache_dir):
+                if file.endswith('.cache'):
+                    os.remove(os.path.join(self.cache_dir, file))
+            
+            self.metrics = {
+                'hits': 0,
+                'misses': 0,
+                'total_requests': 0,
+                'cache_size_mb': 0
+            }
+            return True
+        except:
+            return False
 
-# Global cache instance
+# Global cache manager
 cache_manager = EnhancedCacheManager()
 
-def cached(cache_type: str = "default", ttl_override: Optional[int] = None):
-    """Decorator for automatic caching of function results"""
-    def decorator(func):
-        @wraps(func)
+def cached_function(ttl: int = 3600, key_prefix: str = ""):
+    """Decorator for caching function results"""
+    def decorator(func: Callable) -> Callable:
         def wrapper(*args, **kwargs):
             # Generate cache key
-            key = cache_manager.get_cache_key(f"{func.__name__}", *args, **kwargs)
+            cache_key = f"{key_prefix}_{func.__name__}_{cache_manager.get_cache_key(*args, **kwargs)}"
             
             # Try to get from cache
-            result = cache_manager.get(key, cache_type)
-            if result is not None:
-                return result
+            cached_result = cache_manager.get(cache_key)
+            if cached_result is not None:
+                return cached_result
             
             # Execute function and cache result
+            start_time = time.time()
             result = func(*args, **kwargs)
-            cache_manager.set(key, result, cache_type)
+            execution_time = time.time() - start_time
+            
+            # Cache the result
+            cache_manager.set(cache_key, result, ttl)
+            
+            # Log performance if enabled
+            if hasattr(st.session_state, 'debug_mode') and st.session_state.debug_mode:
+                st.sidebar.info(f"🔄 {func.__name__}: {execution_time:.2f}s (cached)")
             
             return result
+        
         return wrapper
     return decorator
 
-# Convenience functions
-def get_cache() -> EnhancedCacheManager:
-    """Get the global cache manager instance"""
-    return cache_manager
+@cached_function(ttl=3600, key_prefix="fpl_data")
+def cached_load_fpl_data():
+    """Cached FPL data loading"""
+    from services.fpl_data_service import FPLDataService
+    service = FPLDataService()
+    return service.load_fpl_data()
 
-def invalidate_cache(pattern: Optional[str] = None):
-    """Invalidate cache entries matching pattern"""
-    cache_manager.clear()
+@cached_function(ttl=1800, key_prefix="team_data")
+def cached_load_team_data(team_id: str, gameweek: int):
+    """Cached team data loading"""
+    from services.fpl_data_service import FPLDataService
+    service = FPLDataService()
+    return service.load_team_data(team_id, gameweek)
 
-def get_cache_stats() -> Dict[str, Any]:
-    """Get cache statistics"""
-    return cache_manager.get_stats()
+def display_cache_metrics():
+    """Display cache performance metrics in sidebar"""
+    metrics = cache_manager.get_metrics()
+    
+    with st.sidebar.expander("📊 Cache Performance"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Hit Rate", f"{metrics['hit_rate_percent']:.1f}%")
+            st.metric("Cache Size", f"{metrics['cache_size_mb']:.1f}MB")
+        
+        with col2:
+            st.metric("Hits", metrics['hits'])
+            st.metric("Misses", metrics['misses'])
+        
+        if st.button("Clear Cache"):
+            cache_manager.clear_cache()
+            st.success("Cache cleared!")
+            st.rerun()

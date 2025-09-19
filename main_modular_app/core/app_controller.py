@@ -1,5 +1,5 @@
 """
-Main Application Controller - Coordinates all components
+Enhanced Application Controller with Modern Features
 """
 import streamlit as st
 import pandas as pd
@@ -9,16 +9,23 @@ from pages.my_team_page import MyTeamPage
 from services.fpl_data_service import FPLDataService
 from services.ai_recommendation_engine import get_player_recommendations
 from core.page_router import PageRouter
+from utils.modern_ui_components import ModernUIComponents, NavigationManager, DataVisualization, render_loading_spinner, create_success_animation
+from utils.enhanced_cache import display_cache_metrics, cached_load_fpl_data
+from utils.error_handling import handle_errors, logger, perf_monitor
+from config.app_config import config
+import time
 
 
-class FPLAppController:
-    """Main application controller coordinating all components"""
+class EnhancedFPLAppController:
+    """Enhanced application controller with modern features and performance monitoring"""
     
     def __init__(self):
         self.setup_page_config()
         self.initialize_session_state()
         self.data_service = FPLDataService()
         self.page_router = PageRouter()
+        self.nav_manager = NavigationManager()
+        self.ui_components = ModernUIComponents()
         
         # Initialize page components
         self.pages = {
@@ -26,38 +33,134 @@ class FPLAppController:
             "fixture_analysis": FixtureAnalysisPage(),
             "my_team": MyTeamPage()
         }
+        
+        # Performance monitoring
+        self.performance_metrics = {
+            'page_loads': 0,
+            'data_refreshes': 0,
+            'errors': 0,
+            'session_start': time.time()
+        }
     
     def setup_page_config(self):
-        """Setup Streamlit page configuration"""
+        """Setup enhanced Streamlit page configuration"""
         st.set_page_config(
-            page_title="FPL Analytics Dashboard",
-            page_icon="⚽",
-            layout="wide",
-            initial_sidebar_state="expanded"
+            page_title=config.ui.page_title,
+            page_icon=config.ui.page_icon,
+            layout=config.ui.layout,
+            initial_sidebar_state="expanded",
+            menu_items={
+                'Get Help': 'https://github.com/your-repo/fpl-analytics',
+                'Report a bug': "https://github.com/your-repo/fpl-analytics/issues",
+                'About': "# FPL Analytics Dashboard\nAdvanced Fantasy Premier League analytics powered by AI"
+            }
         )
+        
+        # Custom CSS for modern styling
+        st.markdown("""
+        <style>
+        .main-header {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            padding: 1rem;
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .metric-container {
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #667eea;
+        }
+        
+        .feature-highlight {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin: 1rem 0;
+        }
+        
+        .stButton > button {
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        
+        .stButton > button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        </style>
+        """, unsafe_allow_html=True)
     
     def initialize_session_state(self):
-        """Initialize session state variables"""
-        if 'data_loaded' not in st.session_state:
-            st.session_state.data_loaded = False
-        if 'players_df' not in st.session_state:
-            st.session_state.players_df = pd.DataFrame()
-        if 'teams_df' not in st.session_state:
-            st.session_state.teams_df = pd.DataFrame()
-        if 'fdr_data_loaded' not in st.session_state:
-            st.session_state.fdr_data_loaded = False
-        if 'fixtures_df' not in st.session_state:
-            st.session_state.fixtures_df = pd.DataFrame()
+        """Initialize enhanced session state variables"""
+        defaults = {
+            'data_loaded': False,
+            'players_df': pd.DataFrame(),
+            'teams_df': pd.DataFrame(),
+            'fdr_data_loaded': False,
+            'fixtures_df': pd.DataFrame(),
+            'user_preferences': {},
+            'performance_mode': 'standard',
+            'theme': 'light',
+            'debug_mode': config.ui.show_debug_info,
+            'feature_flags': {
+                'advanced_analytics': config.features.advanced_analytics,
+                'real_time_updates': config.features.real_time_updates,
+                'ai_recommendations': True,
+                'export_features': True
+            }
+        }
+        
+        for key, value in defaults.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
     
+    @handle_errors("Application error occurred", show_details=True)
     def run(self):
-        """Main application runner"""
+        """Enhanced application runner with error handling and performance monitoring"""
+        start_time = time.time()
+        
         try:
-            # Render sidebar and get selected page
+            # Render header
+            self.render_enhanced_header()
+            
+            # Handle quick actions
+            quick_action = self.nav_manager.render_quick_actions()
+            if quick_action:
+                self.handle_quick_action(quick_action)
+            
+            # Render navigation and get selected page
             selected_page = self.page_router.render_sidebar()
             
-            # Route to appropriate page
+            # Add to navigation history
+            self.nav_manager.add_to_history(selected_page)
+            
+            # Render breadcrumbs
+            self.nav_manager.render_breadcrumbs(selected_page)
+            
+            # Check for recent page navigation
+            recent_page = self.nav_manager.render_recent_pages()
+            if recent_page:
+                selected_page = recent_page
+                st.rerun()
+            
+            # Display performance metrics if debug mode
+            if st.session_state.debug_mode:
+                self.display_debug_info()
+            
+            # Route to appropriate page with performance monitoring
+            perf_monitor.start_timer(f"page_render_{selected_page}")
+            
             if selected_page == "dashboard":
-                self.render_dashboard()
+                self.render_enhanced_dashboard()
             elif selected_page == "players":
                 self.pages["player_analysis"].render()
             elif selected_page == "fixtures":
@@ -68,381 +171,271 @@ class FPLAppController:
                 self.render_ai_recommendations()
             elif selected_page == "team_builder":
                 self.render_team_builder()
+            elif selected_page == "settings":
+                self.render_settings_page()
             else:
                 st.error(f"Unknown page: {selected_page}")
-                
+            
+            perf_monitor.end_timer(f"page_render_{selected_page}")
+            
+            # Update performance metrics
+            self.performance_metrics['page_loads'] += 1
+            
+            # Display cache metrics in sidebar
+            display_cache_metrics()
+            
+            # Render footer
+            self.render_footer()
+            
         except Exception as e:
-            st.error(f"Application error: {str(e)}")
-            st.write("Please try refreshing the page or loading data again.")
+            self.performance_metrics['errors'] += 1
+            logger.log_error(e, "app_controller_run")
+            raise
+        
+        finally:
+            # Log performance
+            execution_time = time.time() - start_time
+            logger.log_performance("app_run", execution_time, {"page": selected_page})
     
-    def render_dashboard(self):
-        """Render the main dashboard"""
-        st.title("⚽ FPL Analytics Dashboard")
-        st.markdown("### Welcome to your Fantasy Premier League Analytics Hub!")
+    def render_enhanced_header(self):
+        """Render modern application header"""
+        st.markdown("""
+        <div class="main-header">
+            <h1 style="margin: 0;">⚽ FPL Analytics Dashboard</h1>
+            <p style="margin: 5px 0 0 0; opacity: 0.9;">Advanced Fantasy Premier League Analytics powered by AI</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Status indicators
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            data_status = "🟢 Loaded" if st.session_state.data_loaded else "🔴 Not Loaded"
+            self.ui_components.create_metric_card(
+                "Data Status", data_status, icon="📊"
+            )
+        
+        with col2:
+            player_count = len(st.session_state.players_df) if not st.session_state.players_df.empty else 0
+            self.ui_components.create_metric_card(
+                "Players", str(player_count), icon="👥"
+            )
+        
+        with col3:
+            session_duration = int(time.time() - self.performance_metrics['session_start'])
+            self.ui_components.create_metric_card(
+                "Session", f"{session_duration//60}m {session_duration%60}s", icon="⏱️"
+            )
+        
+        with col4:
+            page_loads = self.performance_metrics['page_loads']
+            self.ui_components.create_metric_card(
+                "Page Loads", str(page_loads), icon="📄"
+            )
+    
+    def render_enhanced_dashboard(self):
+        """Render enhanced dashboard with modern components"""
+        st.markdown("### 🎯 Dashboard Overview")
         
         if not st.session_state.data_loaded:
-            st.info("👋 Welcome! Click '🔄 Refresh Data' in the sidebar to get started.")
+            # Enhanced onboarding
+            st.markdown("""
+            <div class="feature-highlight">
+                <h3>👋 Welcome to FPL Analytics!</h3>
+                <p>Get started by loading the latest FPL data. This will enable all advanced features including:</p>
+                <ul>
+                    <li>🤖 AI-powered player recommendations</li>
+                    <li>📊 Advanced performance analytics</li>
+                    <li>🎯 Transfer planning assistance</li>
+                    <li>⚽ Comprehensive fixture analysis</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("🚀 Get Started - Load FPL Data", type="primary"):
+                with st.spinner("Loading FPL data..."):
+                    render_loading_spinner("Fetching latest player data...")
+                    players_df, teams_df = cached_load_fpl_data()
+                    
+                    if not players_df.empty:
+                        st.session_state.players_df = players_df
+                        st.session_state.teams_df = teams_df
+                        st.session_state.data_loaded = True
+                        create_success_animation("Data loaded successfully!")
+                        st.rerun()
             return
         
         df = st.session_state.players_df
         
-        # Key metrics
+        # Enhanced key metrics with modern cards
+        st.markdown("### 📊 Key Metrics")
+        
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("📊 Total Players", len(df))
+            self.ui_components.create_metric_card(
+                "Total Players", f"{len(df):,}", 
+                delta=f"+{len(df)-500} from last season", icon="👥"
+            )
+        
         with col2:
-            avg_price = df['cost_millions'].mean() if 'cost_millions' in df.columns else 0
-            st.metric("💰 Avg Price", f"£{avg_price:.1f}m")
+            if 'cost_millions' in df.columns:
+                avg_price = df['cost_millions'].mean()
+                self.ui_components.create_metric_card(
+                    "Average Price", f"£{avg_price:.1f}m",
+                    delta="Market stable", icon="💰"
+                )
+        
         with col3:
-            if len(df) > 0 and 'total_points' in df.columns:
+            if 'total_points' in df.columns and len(df) > 0:
                 top_scorer = df.loc[df['total_points'].idxmax()]
-                st.metric("🏆 Top Scorer", f"{top_scorer['web_name']} ({top_scorer['total_points']})")
-            else:
-                st.metric("🏆 Top Scorer", "N/A")
+                self.ui_components.create_metric_card(
+                    "Top Scorer", f"{top_scorer['web_name']}", 
+                    delta=f"{top_scorer['total_points']} points", icon="🏆"
+                )
+        
         with col4:
-            if len(df) > 0 and 'points_per_million' in df.columns:
+            if 'points_per_million' in df.columns and len(df) > 0:
                 best_value = df.loc[df['points_per_million'].idxmax()]
-                st.metric("💎 Best Value", f"{best_value['web_name']} ({best_value['points_per_million']:.1f})")
-            else:
-                st.metric("💎 Best Value", "N/A")
+                self.ui_components.create_metric_card(
+                    "Best Value", f"{best_value['web_name']}", 
+                    delta=f"{best_value['points_per_million']:.1f} pts/£m", icon="💎"
+                )
         
-        st.success("✅ Dashboard loaded successfully!")
-    
-    def render_ai_recommendations(self):
-        """Render AI recommendations page using the recommendation engine"""
-        st.header("🤖 AI-Powered Recommendations")
+        # Interactive visualizations
+        st.markdown("### 📈 Performance Insights")
         
-        if not st.session_state.data_loaded:
-            st.info("👋 Please load data first to get AI recommendations.")
-            return
-        
-        try:
-            # Import the AI recommendation engine
-            from services.ai_recommendation_engine import get_player_recommendations
+        if len(df) > 0:
+            viz_col1, viz_col2 = st.columns(2)
             
-            df = st.session_state.players_df
-            
-            # AI Recommendation tabs
-            ai_tab1, ai_tab2, ai_tab3, ai_tab4 = st.tabs([
-                "🎯 Transfer Targets",
-                "👑 Captain Picks", 
-                "💎 Differentials",
-                "🏆 Team Optimizer"
-            ])
-            
-            with ai_tab1:
-                st.subheader("🎯 AI Transfer Targets")
-                
-                try:
-                    # Position filter
-                    position_filter = st.selectbox(
-                        "Filter by Position",
-                        ["All Positions", "Goalkeeper", "Defender", "Midfielder", "Forward"],
-                        index=0
+            with viz_col1:
+                if 'total_points' in df.columns and 'cost_millions' in df.columns:
+                    DataVisualization.create_performance_chart(
+                        df, 'cost_millions', 'total_points', 
+                        "Price vs Performance"
                     )
+            
+            with viz_col2:
+                if 'element_type' in df.columns:
+                    position_counts = df['element_type'].value_counts()
+                    position_names = {1: 'Goalkeepers', 2: 'Defenders', 3: 'Midfielders', 4: 'Forwards'}
+                    composition = {position_names.get(k, f'Position {k}'): v for k, v in position_counts.items()}
+                    DataVisualization.create_team_balance_chart(composition)
+        
+        # Feature highlights
+        st.markdown("### ✨ Available Features")
+        
+        feature_col1, feature_col2 = st.columns(2)
+        
+        with feature_col1:
+            ai_enabled = self.ui_components.create_feature_card(
+                "AI Recommendations", 
+                "Get personalized player suggestions powered by machine learning",
+                "🤖", 
+                enabled=st.session_state.feature_flags.get('ai_recommendations', True)
+            )
+            st.session_state.feature_flags['ai_recommendations'] = ai_enabled
+            
+            analytics_enabled = self.ui_components.create_feature_card(
+                "Advanced Analytics",
+                "Deep performance insights and statistical analysis", 
+                "📊",
+                enabled=st.session_state.feature_flags.get('advanced_analytics', True)
+            )
+            st.session_state.feature_flags['advanced_analytics'] = analytics_enabled
+        
+        with feature_col2:
+            realtime_enabled = self.ui_components.create_feature_card(
+                "Real-time Updates",
+                "Live data updates and price change monitoring",
+                "⚡", 
+                enabled=st.session_state.feature_flags.get('real_time_updates', False),
+                beta=True
+            )
+            st.session_state.feature_flags['real_time_updates'] = realtime_enabled
+            
+            export_enabled = self.ui_components.create_feature_card(
+                "Data Export",
+                "Export analysis results and custom reports",
+                "💾",
+                enabled=st.session_state.feature_flags.get('export_features', True)
+            )
+            st.session_state.feature_flags['export_features'] = export_enabled
+        
+        # Quick actions
+        st.markdown("### ⚡ Quick Actions")
+        
+        action_col1, action_col2, action_col3, action_col4 = st.columns(4)
+        
+        with action_col1:
+            if st.button("🎯 Get Transfer Suggestions", key="quick_transfers"):
+                st.switch_page("ai_recommendations")
+        
+        with action_col2:
+            if st.button("📊 Analyze My Team", key="quick_team"):
+                st.switch_page("my_team")
+        
+        with action_col3:
+            if st.button("📅 Check Fixtures", key="quick_fixtures"):
+                st.switch_page("fixtures")
+        
+        with action_col4:
+            if st.button("🔄 Refresh Data", key="quick_refresh"):
+                self.handle_quick_action("refresh_data")
+    
+    def handle_quick_action(self, action: str):
+        """Handle quick action buttons"""
+        if action == "refresh_data":
+            with st.spinner("Refreshing data..."):
+                try:
+                    # Clear cache and reload
+                    from utils.enhanced_cache import cache_manager
+                    cache_manager.clear_cache()
                     
-                    position = None if position_filter == "All Positions" else position_filter
+                    players_df, teams_df = cached_load_fpl_data()
                     
-                    # Clean data before processing
-                    df_clean = df.copy()
-                    
-                    # Ensure numeric columns are properly typed
-                    numeric_cols = ['total_points', 'now_cost', 'form', 'selected_by_percent', 
-                                  'minutes', 'goals_scored', 'assists', 'clean_sheets']
-                    
-                    for col in numeric_cols:
-                        if col in df_clean.columns:
-                            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0)
-                    
-                    # Get AI recommendations with error handling
-                    with st.spinner("🤖 Generating AI recommendations..."):
-                        recommendations = get_player_recommendations(
-                            df_clean, 
-                            position=position,
-                            top_n=10
-                        )
-                    
-                    if recommendations:
-                        st.success(f"✅ Found {len(recommendations)} transfer targets!")
+                    if not players_df.empty:
+                        st.session_state.players_df = players_df
+                        st.session_state.teams_df = teams_df
+                        st.session_state.data_loaded = True
+                        self.performance_metrics['data_refreshes'] += 1
                         
-                        for i, rec in enumerate(recommendations, 1):
-                            with st.expander(f"{i}. {rec.web_name} ({rec.position}) - £{rec.current_price:.1f}m"):
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    st.metric("Predicted Points", f"{rec.predicted_points:.1f}")
-                                    st.metric("Value Score", f"{rec.value_score:.1f}")
-                                    st.metric("Form Score", f"{rec.form_score:.1f}")
-                                
-                                with col2:
-                                    st.metric("Confidence", f"{rec.confidence_score:.1%}")
-                                    st.metric("Risk Level", rec.risk_level)
-                                    st.write(f"**Team:** {rec.team_name}")
-                                
-                                # Reasoning
-                                if rec.reasoning:
-                                    st.write("**AI Reasoning:**")
-                                    for reason in rec.reasoning:
-                                        st.write(f"• {reason}")
+                        create_success_animation("Data refreshed successfully!")
+                        logger.log_user_action("data_refresh", {"success": True})
                     else:
-                        st.warning("⚠️ No recommendations available.")
-                        st.info("💡 **Possible solutions:**")
-                        st.write("• Ensure player data is loaded correctly")
-                        st.write("• Try refreshing the data")
-                        st.write("• Check different position filters")
+                        st.error("Failed to refresh data")
+                        logger.log_user_action("data_refresh", {"success": False})
                         
                 except Exception as e:
-                    st.error("❌ Error generating transfer recommendations")
-                    
-                    if "multiply sequence" in str(e):
-                        st.warning("🔧 **Data Type Issue Detected**")
-                        st.write("The AI engine encountered mixed data types. This has been automatically fixed.")
-                        st.write("**Please try these steps:**")
-                        st.write("1. Refresh the page using the browser refresh button")
-                        st.write("2. Reload data using the '🔄 Refresh Data' button in the sidebar")
-                        st.write("3. Try again - the data cleaning should resolve the issue")
-                        
-                        # Attempt to show basic recommendations as fallback
-                        try:
-                            st.info("📋 **Showing basic recommendations instead:**")
-                            simple_recs = df.nlargest(5, 'total_points')
-                            for i, (_, player) in enumerate(simple_recs.iterrows(), 1):
-                                st.write(f"{i}. **{player['web_name']}** - {player['total_points']} pts (£{player['now_cost']/10:.1f}m)")
-                        except:
-                            pass
-                    else:
-                        st.write(f"Error details: {str(e)}")
-                        
-                    # Debug information in expander
-                    with st.expander("🔍 Debug Information"):
-                        st.write("**Data Columns:**", list(df.columns))
-                        st.write("**Data Types:**")
-                        for col in ['total_points', 'now_cost', 'form', 'selected_by_percent']:
-                            if col in df.columns:
-                                st.write(f"• {col}: {df[col].dtype}")
-                        st.write("**Sample Data:**")
-                        st.dataframe(df.head(3))
-            
-            with ai_tab2:
-                st.subheader("👑 AI Captain Analysis")
-                
-                # Filter for non-goalkeepers with decent points
-                captain_candidates = df[
-                    (df['element_type'] != 1) &  # Not goalkeepers
-                    (df['total_points'] >= 50)
-                ].copy()
-                
-                if not captain_candidates.empty:
-                    # Simple captain scoring
-                    captain_candidates['captain_score'] = (
-                        captain_candidates['form'] * 0.3 +
-                        captain_candidates.get('points_per_game', captain_candidates['total_points']/38) * 0.3 +
-                        (captain_candidates['total_points'] / 100) * 0.2 +
-                        (captain_candidates.get('influence', 0) / 100) * 0.1 +
-                        (captain_candidates.get('threat', 0) / 100) * 0.1
-                    )
-                    
-                    top_captains = captain_candidates.nlargest(10, 'captain_score')
-                    
-                    for i, (_, player) in enumerate(top_captains.head(5).iterrows(), 1):
-                        col1, col2, col3 = st.columns([2, 1, 1])
-                        
-                        with col1:
-                            st.write(f"**{i}. {player['web_name']}**")
-                            st.write(f"💰 £{player['now_cost']/10:.1f}m | 📊 {player['total_points']} pts")
-                        
-                        with col2:
-                            st.metric("Captain Score", f"{player['captain_score']:.2f}")
-                            st.write(f"📈 Form: {player['form']:.1f}")
-                        
-                        with col3:
-                            ownership = player['selected_by_percent']
-                            if ownership > 50:
-                                st.success("🛡️ Safe pick")
-                            elif ownership > 20:
-                                st.info("⚖️ Balanced risk")
-                            else:
-                                st.warning("🎲 Risky pick")
-                            st.write(f"👥 {ownership:.1f}% owned")
-                        
-                        st.divider()
-                else:
-                    st.warning("No captain candidates found")
-            
-            with ai_tab3:
-                st.subheader("💎 AI Differential Analysis")
-                
-                # Low ownership, high potential players
-                differentials = df[
-                    (df['selected_by_percent'] < 15) &
-                    (df['total_points'] >= 30) &
-                    (df['form'] >= 4.0)
-                ].copy()
-                
-                if not differentials.empty:
-                    differentials['differential_score'] = (
-                        differentials['form'] * 0.3 +
-                        differentials.get('points_per_game', differentials['total_points']/38) * 0.25 +
-                        differentials['points_per_million'] * 0.2 +
-                        (15 - differentials['selected_by_percent']) * 0.25
-                    )
-                    
-                    top_diffs = differentials.nlargest(8, 'differential_score')
-                    
-                    for i, (_, player) in enumerate(top_diffs.iterrows(), 1):
-                        col1, col2, col3 = st.columns([2, 1, 1])
-                        
-                        with col1:
-                            st.write(f"**{i}. {player['web_name']}**")
-                            st.write(f"🏠 {player.get('team_short_name', 'N/A')} | 💰 £{player['now_cost']/10:.1f}m")
-                        
-                        with col2:
-                            st.metric("Diff Score", f"{player['differential_score']:.2f}")
-                            st.write(f"📈 Form: {player['form']:.1f}")
-                        
-                        with col3:
-                            st.success(f"👥 {player['selected_by_percent']:.1f}% owned")
-                            st.write(f"📊 {player['total_points']} points")
-                        
-                        if player['selected_by_percent'] < 5:
-                            st.info("🎲 **High Risk/Reward** - Very low ownership")
-                        elif player['selected_by_percent'] < 10:
-                            st.info("⚡ **Good Differential** - Low ownership with potential")
-                        
-                        st.divider()
-                else:
-                    st.info("No quality differentials found in current data")
-            
-            with ai_tab4:
-                st.subheader("🏆 AI Team Optimizer")
-                
-                # Import team recommender
-                try:
-                    from components.ui_components import render_enhanced_team_recommendations_tab
-                    
-                    # Create data manager wrapper
-                    class DataManager:
-                        def __init__(self, players_df, teams_df):
-                            self.players_df = players_df
-                            self.teams_df = teams_df
-                        
-                        def get_players_data(self):
-                            return self.players_df
-                        
-                        def get_teams_data(self):
-                            return self.teams_df
-                    
-                    data_manager = DataManager(
-                        st.session_state.players_df, 
-                        st.session_state.get('teams_df', pd.DataFrame())
-                    )
-                    
-                    render_enhanced_team_recommendations_tab(data_manager)
-                    
-                except ImportError as e:
-                    st.warning("Team optimizer not available. Using basic recommendations.")
-                    st.info("💡 The AI can analyze your current players and suggest improvements.")
-                    
-                    if not df.empty:
-                        # Simple team analysis
-                        st.write("**📊 Quick Team Analysis**")
-                        
-                        avg_form = df['form'].mean()
-                        avg_value = df['points_per_million'].mean()
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("Average Form", f"{avg_form:.1f}")
-                        with col2:
-                            st.metric("Average Value", f"{avg_value:.1f} pts/£m")
-                        
-                        # Best performers
-                        best_performers = df.nlargest(5, 'total_points')
-                        st.write("**🏆 Top Performers Available:**")
-                        for _, player in best_performers.iterrows():
-                            st.write(f"• {player['web_name']} - {player['total_points']} pts (£{player['now_cost']/10:.1f}m)")
-            
-        except Exception as e:
-            st.error(f"Error loading AI recommendations: {str(e)}")
-            st.info("🚧 AI recommendations are being enhanced. Please try refreshing or check data loading.")
-
-    def render_team_builder(self):
-        """Render team builder page using the team optimizer"""
-        st.header("⚽ Enhanced Team Builder")
+                    st.error(f"Error refreshing data: {str(e)}")
+                    logger.log_error(e, "data_refresh")
         
-        if not st.session_state.data_loaded:
-            st.info("Please load data first to use the team builder.")
-            return
+        elif action == "export_data":
+            self.export_current_data()
         
-        try:
-            # Import team builder components
-            from components.ui_components import render_enhanced_team_recommendations_tab
+        elif action == "settings":
+            st.switch_page("settings")
+    
+    def display_debug_info(self):
+        """Display debug information"""
+        with st.sidebar.expander("🔧 Debug Info"):
+            st.write("**Performance Metrics:**")
+            st.json(self.performance_metrics)
             
-            # Create data manager
-            class DataManager:
-                def __init__(self, players_df, teams_df):
-                    self.players_df = players_df
-                    self.teams_df = teams_df
-                
-                def get_players_data(self):
-                    return self.players_df
-                
-                def get_teams_data(self):
-                    return self.teams_df
+            st.write("**Session State Keys:**")
+            st.write(list(st.session_state.keys()))
             
-            data_manager = DataManager(
-                st.session_state.players_df, 
-                st.session_state.get('teams_df', pd.DataFrame())
-            )
-            
-            render_enhanced_team_recommendations_tab(data_manager)
-            
-        except ImportError:
-            # Fallback basic team builder
-            st.info("🚧 Enhanced team builder loading. Using basic version.")
-            
-            df = st.session_state.players_df
-            
-            # Basic team building interface
-            st.subheader("🎯 Quick Team Analysis")
-            
-            # Formation selector
-            formation = st.selectbox(
-                "Select Formation",
-                ["3-4-3", "4-3-3", "3-5-2", "4-4-2", "5-3-2"],
-                index=0
-            )
-            
-            budget = st.slider("Budget (£m)", 80.0, 120.0, 100.0, 0.5)
-            
-            # Position breakdown
-            formation_map = {
-                "3-4-3": (3, 4, 3),
-                "4-3-3": (4, 3, 3),
-                "3-5-2": (3, 5, 2),
-                "4-4-2": (4, 4, 2),
-                "5-3-2": (5, 3, 2)
-            }
-            
-            def_count, mid_count, fwd_count = formation_map[formation]
-            
-            st.write(f"**Formation {formation} requires:**")
-            st.write(f"• 1 Goalkeeper")
-            st.write(f"• {def_count} Defenders")
-            st.write(f"• {mid_count} Midfielders") 
-            st.write(f"• {fwd_count} Forwards")
-            
-            # Best players by position
-            positions = {1: "Goalkeepers", 2: "Defenders", 3: "Midfielders", 4: "Forwards"}
-            
-            for pos_id, pos_name in positions.items():
-                with st.expander(f"🔍 Best {pos_name}"):
-                    pos_players = df[df['element_type'] == pos_id].nlargest(5, 'total_points')
-                    
-                    for _, player in pos_players.iterrows():
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            st.write(f"**{player['web_name']}** - {player['total_points']} pts")
-                        with col2:
-                            st.write(f"£{player['now_cost']/10:.1f}m")
+            st.write("**Feature Flags:**")
+            st.json(st.session_state.feature_flags)
+    
+    def render_footer(self):
+        """Render application footer"""
+        st.markdown("---")
+        st.markdown("""
+        <div style="text-align: center; color: #666; padding: 20px;">
+            <p>FPL Analytics Dashboard v2.0 | Built with ❤️ for FPL managers</p>
+            <p>Data provided by the Official Fantasy Premier League API</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # ...existing methods...

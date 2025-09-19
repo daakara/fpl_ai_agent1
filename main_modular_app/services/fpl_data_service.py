@@ -7,6 +7,7 @@ import numpy as np
 import requests
 import warnings
 import urllib3
+from typing import Optional, Tuple, Dict, Any
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -18,9 +19,15 @@ class FPLDataService:
     
     def __init__(self):
         self.base_url = "https://fantasy.premierleague.com/api"
+        self.numeric_columns = [
+            'total_points', 'now_cost', 'form', 'selected_by_percent', 
+            'minutes', 'goals_scored', 'assists', 'clean_sheets',
+            'bonus', 'bps', 'influence', 'creativity', 'threat', 
+            'ict_index', 'points_per_game', 'value_form', 'value_season'
+        ]
     
-    def load_fpl_data(self):
-        """Load comprehensive FPL data from API"""
+    def load_fpl_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Load comprehensive FPL data from API with robust error handling"""
         try:
             url = f"{self.base_url}/bootstrap-static/"
             response = requests.get(url, timeout=30, verify=False)
@@ -28,15 +35,53 @@ class FPLDataService:
             
             data = response.json()
             
-            # Process data
+            # Process data with enhanced validation
             players_df = self._process_players_data(data)
             teams_df = self._process_teams_data(data)
+            
+            # Validate data integrity
+            players_df = self._validate_and_clean_data(players_df)
             
             return players_df, teams_df
             
         except Exception as e:
             st.error(f"Error loading FPL data: {str(e)}")
             return pd.DataFrame(), pd.DataFrame()
+    
+    def _validate_and_clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Comprehensive data validation and cleaning"""
+        if df.empty:
+            return df
+        
+        # Ensure all numeric columns are properly typed
+        for col in self.numeric_columns:
+            if col in df.columns:
+                # Convert to numeric, handling any string values
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                # Fill NaN values with appropriate defaults
+                if col in ['total_points', 'goals_scored', 'assists', 'clean_sheets', 'bonus', 'minutes']:
+                    df[col] = df[col].fillna(0)
+                elif col in ['form', 'selected_by_percent', 'points_per_game']:
+                    df[col] = df[col].fillna(0.0)
+                elif col == 'now_cost':
+                    df[col] = df[col].fillna(40)  # Default minimum price
+                else:
+                    df[col] = df[col].fillna(0)
+        
+        # Validate calculated fields
+        df['cost_millions'] = pd.to_numeric(df['cost_millions'], errors='coerce').fillna(4.0)
+        df['points_per_million'] = pd.to_numeric(df['points_per_million'], errors='coerce').fillna(0.0)
+        
+        # Ensure no infinite values
+        df = df.replace([np.inf, -np.inf], 0)
+        
+        # Validate string columns
+        string_columns = ['web_name', 'first_name', 'second_name', 'team_name', 'team_short_name', 'position_name']
+        for col in string_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(str).fillna('Unknown')
+        
+        return df
     
     def _process_players_data(self, data):
         """Process and enhance players data"""

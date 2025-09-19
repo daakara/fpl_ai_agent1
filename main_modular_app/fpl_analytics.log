@@ -1,0 +1,13 @@
+2025-09-19 18:06:38,890 - fpl_analytics - INFO - Performance - page_render_dashboard: 0.00s
+2025-09-19 18:06:38,946 - fpl_analytics - INFO - Performance - app_run: 0.11s - {'page': 'dashboard'}
+2025-09-19 18:07:08,585 - fpl_analytics - INFO - Performance - page_render_dashboard: 1.39s
+2025-09-19 18:07:08,600 - fpl_analytics - INFO - Performance - app_run: 2.76s - {'page': 'dashboard'}
+2025-09-19 18:09:21,039 - fpl_analytics - INFO - Performance - page_render_players: 0.60s
+2025-09-19 18:09:21,055 - fpl_analytics - INFO - Performance - app_run: 0.64s - {'page': 'players'}
+2025-09-19 18:10:20,796 - fpl_analytics - INFO - Performance - page_render_my_team: 7.79s
+2025-09-19 18:10:20,821 - fpl_analytics - INFO - Performance - app_run: 7.86s - {'page': 'my_team'}
+2025-09-19 18:10:25,586 - fpl_analytics - INFO - Performance - page_render_my_team: 0.87s
+2025-09-19 18:10:25,607 - fpl_analytics - INFO - Performance - app_run: 0.93s - {'page': 'my_team'}
+2025-09-19 18:10:29,008 - fpl_analytics - INFO - Performance - app_run: 2.25s - {'page': 'my_team'}
+2025-09-19 18:10:33,660 - fpl_analytics - INFO - Performance - page_render_my_team: 4.40s
+2025-09-19 18:10:33,660 - fpl_analytics - INFO - Performance - app_run: 4.45s - {'page': 'my_team'}
