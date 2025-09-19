@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from typing import Dict
 from services.fixture_service import FixtureService
 
 
@@ -81,11 +82,37 @@ class FixtureAnalysisPage:
             self._display_advanced_fixture_analysis(df)
     
     def _display_overall_fixture_difficulty(self, df):
-        """Display overall fixture difficulty for next 5 games"""
-        st.subheader("🎯 Overall Fixture Difficulty (Next 5 Games)")
+        """Display overall fixture difficulty for current + next 4 games (5 total)"""
+        st.subheader("🎯 Fixture Difficulty Heatmap (Current GW + Next 4)")
+        
+        with st.expander("📚 Understanding the Heatmap", expanded=False):
+            st.markdown("""
+            **Fixture Difficulty Heatmap** shows the next 5 gameweeks for all teams:
+            
+            🎯 **Current GW + Next 4**: Comprehensive 5-gameweek outlook
+            📊 **Color Coding**: Green = Easy, Yellow = Average, Red = Difficult
+            ⚔️ **Attack vs Defense**: Separate analysis for attacking and defensive players
+            🏠 **Home Advantage**: Considered in difficulty calculations
+            """)
         
         # Get unique teams
         all_teams = df['team_short_name'].unique() if 'team_short_name' in df.columns else []
+        
+        # Fixture difficulty tabs
+        difficulty_tabs = st.tabs(["📊 Overall Difficulty", "⚔️ Attack Difficulty", "🛡️ Defense Difficulty"])
+        
+        with difficulty_tabs[0]:
+            self._display_overall_difficulty_heatmap(df, all_teams)
+        
+        with difficulty_tabs[1]:
+            self._display_attack_difficulty_heatmap(df, all_teams)
+        
+        with difficulty_tabs[2]:
+            self._display_defense_difficulty_heatmap(df, all_teams)
+    
+    def _display_overall_difficulty_heatmap(self, df, all_teams):
+        """Display overall fixture difficulty heatmap"""
+        st.subheader("📊 Overall Fixture Difficulty")
         
         # Calculate fixture difficulty for each team
         team_fixtures = {}
@@ -125,43 +152,13 @@ class FixtureAnalysisPage:
             best_team = min(team_fixtures.keys(), key=lambda t: team_fixtures[t]['average_difficulty']) if team_fixtures else "N/A"
             st.metric("Best Fixtures", f"🎯 {best_team}")
         
-        # Detailed team-by-team breakdown
-        st.subheader("📋 Team-by-Team Fixture Breakdown")
-        
-        # Sort teams by difficulty (easiest first)
-        sorted_teams = sorted(team_fixtures.items(), key=lambda x: x[1]['average_difficulty'])
-        
-        for team_name, fixtures_data in sorted_teams:
-            with st.expander(f"⚽ {team_name} - {fixtures_data['rating']} Fixtures ({fixtures_data['average_difficulty']:.1f} avg)"):
-                
-                # Show next 5 fixtures
-                col1, col2 = st.columns([2, 1])
-                
-                with col1:
-                    st.write("**Next 5 Fixtures:**")
-                    for fixture in fixtures_data['fixtures']:
-                        home_away = "🏠 vs" if fixture['home'] else "✈️ @"
-                        difficulty_emoji = "🟢" if fixture['difficulty'] <= 2 else "🟡" if fixture['difficulty'] == 3 else "🔴"
-                        st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {difficulty_emoji} ({fixture['difficulty_text']})")
-                
-                with col2:
-                    st.metric("Average Difficulty", f"{fixtures_data['average_difficulty']:.1f}")
-                    st.metric("Total Difficulty", fixtures_data['total_difficulty'])
-                    
-                    # Show top players from this team
-                    team_players = df[df['team_short_name'] == team_name]
-                    if not team_players.empty:
-                        top_players = team_players.nlargest(3, 'total_points')
-                        st.write("**Top Players:**")
-                        for _, player in top_players.iterrows():
-                            st.write(f"• {player.get('web_name', 'Unknown')}")
-        
-        # Fixture difficulty heatmap
+        # Create fixture difficulty heatmap
         st.subheader("🔥 Fixture Difficulty Heatmap")
         
         # Create difficulty matrix
         heatmap_data = []
-        gameweeks = list(range(1, 6))  # Next 5 gameweeks
+        current_gw = self._get_current_gameweek()
+        gameweek_labels = [f"GW{current_gw + i}" for i in range(5)]
         
         for team_name, fixtures_data in team_fixtures.items():
             team_row = [team_name]
@@ -174,30 +171,428 @@ class FixtureAnalysisPage:
             heatmap_data.append(team_row)
         
         if heatmap_data:
-            heatmap_df = pd.DataFrame(heatmap_data, columns=['Team'] + [f'GW+{i+1}' for i in range(5)])
+            heatmap_df = pd.DataFrame(heatmap_data, columns=['Team'] + gameweek_labels)
             
             # Display as styled dataframe
             def style_difficulty(val):
                 if isinstance(val, str):  # Team name column
                     return ''
                 elif val <= 2:
-                    return 'background-color: #90EE90'  # Light green
+                    return 'background-color: #90EE90; color: black'  # Light green
                 elif val == 3:
-                    return 'background-color: #FFFFE0'  # Light yellow  
+                    return 'background-color: #FFFFE0; color: black'  # Light yellow  
                 else:
-                    return 'background-color: #FFB6C1'  # Light red
+                    return 'background-color: #FFB6C1; color: black'  # Light red
             
             styled_df = heatmap_df.style.applymap(style_difficulty)
             st.dataframe(styled_df, use_container_width=True, hide_index=True)
             
-            # Legend
+            # Legend and insights
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.write("🟢 **Easy (1-2)**: Target for transfers in")
+                st.success("🟢 **Easy (1-2)**: Target for transfers in")
             with col2:
-                st.write("🟡 **Average (3)**: Monitor closely")
+                st.info("🟡 **Average (3)**: Monitor closely")
             with col3:
-                st.write("🔴 **Hard (4-5)**: Consider transfers out")
+                st.error("🔴 **Hard (4-5)**: Consider transfers out")
+        
+        # Detailed team-by-team breakdown
+        self._display_team_fixture_breakdown(team_fixtures, df)
+    
+    def _display_attack_difficulty_heatmap(self, df, all_teams):
+        """Display attacking fixture difficulty heatmap"""
+        st.subheader("⚔️ Attack Fixture Difficulty")
+        st.info("💡 **Lower difficulty = Better for attacking players** (Forwards, Midfielders)")
+        
+        # Calculate attacking fixture difficulty for each team
+        team_attack_fixtures = {}
+        for team in all_teams:
+            if pd.notna(team):
+                fixtures = self.fixture_service.get_upcoming_fixtures_difficulty(team, 5)
+                # For attacking, we analyze how strong the opponent's defense is
+                attack_fixtures = self._calculate_attack_difficulty(team, fixtures)
+                team_attack_fixtures[team] = attack_fixtures
+        
+        if not team_attack_fixtures:
+            st.warning("No fixture data available for attack analysis.")
+            return
+        
+        # Display attack-specific metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        attack_difficulties = []
+        for team_data in team_attack_fixtures.values():
+            attack_difficulties.extend([f['attack_difficulty'] for f in team_data['fixtures']])
+        
+        avg_attack_difficulty = np.mean(attack_difficulties) if attack_difficulties else 3
+        
+        with col1:
+            difficulty_color = "🟢" if avg_attack_difficulty <= 2.5 else "🟡" if avg_attack_difficulty <= 3.5 else "🔴"
+            st.metric("Avg Attack Difficulty", f"{difficulty_color} {avg_attack_difficulty:.1f}")
+        
+        with col2:
+            easy_attack = len([d for d in attack_difficulties if d <= 2])
+            st.metric("Easy Attack Fixtures", f"🟢 {easy_attack}")
+        
+        with col3:
+            hard_attack = len([d for d in attack_difficulties if d >= 4])
+            st.metric("Hard Attack Fixtures", f"🔴 {hard_attack}")
+        
+        with col4:
+            best_attack_team = min(team_attack_fixtures.keys(), 
+                                 key=lambda t: team_attack_fixtures[t]['avg_attack_difficulty']) if team_attack_fixtures else "N/A"
+            st.metric("Best Attack Fixtures", f"⚔️ {best_attack_team}")
+        
+        # Create attack difficulty heatmap
+        st.subheader("⚔️ Attack Difficulty Heatmap")
+        
+        heatmap_data = []
+        current_gw = self._get_current_gameweek()
+        gameweek_labels = [f"GW{current_gw + i}" for i in range(5)]
+        
+        for team_name, fixtures_data in team_attack_fixtures.items():
+            team_row = [team_name]
+            for i in range(5):
+                if i < len(fixtures_data['fixtures']):
+                    difficulty = fixtures_data['fixtures'][i]['attack_difficulty']
+                    team_row.append(difficulty)
+                else:
+                    team_row.append(3)
+            heatmap_data.append(team_row)
+        
+        if heatmap_data:
+            heatmap_df = pd.DataFrame(heatmap_data, columns=['Team'] + gameweek_labels)
+            
+            def style_attack_difficulty(val):
+                if isinstance(val, str):
+                    return ''
+                elif val <= 2:
+                    return 'background-color: #90EE90; color: black'
+                elif val == 3:
+                    return 'background-color: #FFFFE0; color: black'
+                else:
+                    return 'background-color: #FFB6C1; color: black'
+            
+            styled_df = heatmap_df.style.applymap(style_attack_difficulty)
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        
+        # Attack-specific recommendations
+        self._display_attack_recommendations(team_attack_fixtures, df)
+    
+    def _display_defense_difficulty_heatmap(self, df, all_teams):
+        """Display defensive fixture difficulty heatmap"""
+        st.subheader("🛡️ Defense Fixture Difficulty")
+        st.info("💡 **Lower difficulty = Better for defensive players** (Goalkeepers, Defenders)")
+        
+        # Calculate defensive fixture difficulty for each team
+        team_defense_fixtures = {}
+        for team in all_teams:
+            if pd.notna(team):
+                fixtures = self.fixture_service.get_upcoming_fixtures_difficulty(team, 5)
+                # For defending, we analyze how strong the opponent's attack is
+                defense_fixtures = self._calculate_defense_difficulty(team, fixtures)
+                team_defense_fixtures[team] = defense_fixtures
+        
+        if not team_defense_fixtures:
+            st.warning("No fixture data available for defense analysis.")
+            return
+        
+        # Display defense-specific metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        defense_difficulties = []
+        for team_data in team_defense_fixtures.values():
+            defense_difficulties.extend([f['defense_difficulty'] for f in team_data['fixtures']])
+        
+        avg_defense_difficulty = np.mean(defense_difficulties) if defense_difficulties else 3
+        
+        with col1:
+            difficulty_color = "🟢" if avg_defense_difficulty <= 2.5 else "🟡" if avg_defense_difficulty <= 3.5 else "🔴"
+            st.metric("Avg Defense Difficulty", f"{difficulty_color} {avg_defense_difficulty:.1f}")
+        
+        with col2:
+            easy_defense = len([d for d in defense_difficulties if d <= 2])
+            st.metric("Easy Defense Fixtures", f"🟢 {easy_defense}")
+        
+        with col3:
+            hard_defense = len([d for d in defense_difficulties if d >= 4])
+            st.metric("Hard Defense Fixtures", f"🔴 {hard_defense}")
+        
+        with col4:
+            best_defense_team = min(team_defense_fixtures.keys(), 
+                                  key=lambda t: team_defense_fixtures[t]['avg_defense_difficulty']) if team_defense_fixtures else "N/A"
+            st.metric("Best Defense Fixtures", f"🛡️ {best_defense_team}")
+        
+        # Create defense difficulty heatmap
+        st.subheader("🛡️ Defense Difficulty Heatmap")
+        
+        heatmap_data = []
+        current_gw = self._get_current_gameweek()
+        gameweek_labels = [f"GW{current_gw + i}" for i in range(5)]
+        
+        for team_name, fixtures_data in team_defense_fixtures.items():
+            team_row = [team_name]
+            for i in range(5):
+                if i < len(fixtures_data['fixtures']):
+                    difficulty = fixtures_data['fixtures'][i]['defense_difficulty']
+                    team_row.append(difficulty)
+                else:
+                    team_row.append(3)
+            heatmap_data.append(team_row)
+        
+        if heatmap_data:
+            heatmap_df = pd.DataFrame(heatmap_data, columns=['Team'] + gameweek_labels)
+            
+            def style_defense_difficulty(val):
+                if isinstance(val, str):
+                    return ''
+                elif val <= 2:
+                    return 'background-color: #90EE90; color: black'
+                elif val == 3:
+                    return 'background-color: #FFFFE0; color: black'
+                else:
+                    return 'background-color: #FFB6C1; color: black'
+            
+            styled_df = heatmap_df.style.applymap(style_defense_difficulty)
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        
+        # Defense-specific recommendations
+        self._display_defense_recommendations(team_defense_fixtures, df)
+    
+    def _calculate_attack_difficulty(self, team_name: str, fixtures_data: Dict) -> Dict:
+        """Calculate attack-specific difficulty based on opponent defensive strength"""
+        attack_fixtures = []
+        total_attack_difficulty = 0
+        
+        for fixture in fixtures_data['fixtures']:
+            opponent = fixture['opponent']
+            is_home = fixture['home']
+            
+            # Get opponent's defensive strength
+            opponent_strength = self.fixture_service.get_team_attack_defense_strength(opponent)
+            opponent_defense = opponent_strength.get('defense', 65)
+            
+            # Calculate attack difficulty (how hard to score against this defense)
+            base_difficulty = opponent_defense / 100 * 5  # Scale to 1-5
+            
+            # Home advantage for attacking
+            if is_home:
+                base_difficulty *= 0.9  # Easier to score at home
+            else:
+                base_difficulty *= 1.1  # Harder to score away
+            
+            # Ensure within 1-5 range
+            attack_difficulty = max(1, min(5, base_difficulty))
+            
+            attack_fixtures.append({
+                **fixture,
+                'attack_difficulty': round(attack_difficulty, 1),
+                'opponent_defense_strength': opponent_defense
+            })
+            
+            total_attack_difficulty += attack_difficulty
+        
+        avg_attack_difficulty = total_attack_difficulty / len(attack_fixtures) if attack_fixtures else 3
+        
+        return {
+            'fixtures': attack_fixtures,
+            'avg_attack_difficulty': avg_attack_difficulty,
+            'total_attack_difficulty': total_attack_difficulty,
+            'attack_rating': self._get_attack_rating(avg_attack_difficulty)
+        }
+    
+    def _calculate_defense_difficulty(self, team_name: str, fixtures_data: Dict) -> Dict:
+        """Calculate defense-specific difficulty based on opponent attacking strength"""
+        defense_fixtures = []
+        total_defense_difficulty = 0
+        
+        for fixture in fixtures_data['fixtures']:
+            opponent = fixture['opponent']
+            is_home = fixture['home']
+            
+            # Get opponent's attacking strength
+            opponent_strength = self.fixture_service.get_team_attack_defense_strength(opponent)
+            opponent_attack = opponent_strength.get('attack', 65)
+            
+            # Calculate defense difficulty (how hard to keep clean sheet against this attack)
+            base_difficulty = opponent_attack / 100 * 5  # Scale to 1-5
+            
+            # Home advantage for defending
+            if is_home:
+                base_difficulty *= 0.85  # Easier to defend at home
+            else:
+                base_difficulty *= 1.15  # Harder to defend away
+            
+            # Ensure within 1-5 range
+            defense_difficulty = max(1, min(5, base_difficulty))
+            
+            defense_fixtures.append({
+                **fixture,
+                'defense_difficulty': round(defense_difficulty, 1),
+                'opponent_attack_strength': opponent_attack
+            })
+            
+            total_defense_difficulty += defense_difficulty
+        
+        avg_defense_difficulty = total_defense_difficulty / len(defense_fixtures) if defense_fixtures else 3
+        
+        return {
+            'fixtures': defense_fixtures,
+            'avg_defense_difficulty': avg_defense_difficulty,
+            'total_defense_difficulty': total_defense_difficulty,
+            'defense_rating': self._get_defense_rating(avg_defense_difficulty)
+        }
+    
+    def _get_attack_rating(self, avg_difficulty: float) -> str:
+        """Get attack rating based on average difficulty"""
+        if avg_difficulty <= 2:
+            return "Excellent Attack Fixtures"
+        elif avg_difficulty <= 2.5:
+            return "Good Attack Fixtures"
+        elif avg_difficulty <= 3.5:
+            return "Average Attack Fixtures"
+        elif avg_difficulty <= 4:
+            return "Difficult Attack Fixtures"
+        else:
+            return "Very Difficult Attack Fixtures"
+    
+    def _get_defense_rating(self, avg_difficulty: float) -> str:
+        """Get defense rating based on average difficulty"""
+        if avg_difficulty <= 2:
+            return "Excellent Defense Fixtures"
+        elif avg_difficulty <= 2.5:
+            return "Good Defense Fixtures"
+        elif avg_difficulty <= 3.5:
+            return "Average Defense Fixtures"
+        elif avg_difficulty <= 4:
+            return "Difficult Defense Fixtures"
+        else:
+            return "Very Difficult Defense Fixtures"
+    
+    def _get_current_gameweek(self) -> int:
+        """Get current gameweek number"""
+        # Try to get from FPL API service first
+        try:
+            from services.enhanced_fpl_api_service import EnhancedFPLAPIService
+            api_service = EnhancedFPLAPIService()
+            current_gw = api_service.get_current_gameweek()
+            if current_gw and current_gw > 0:
+                return current_gw
+        except Exception:
+            pass
+        
+        # Try to get from session state
+        if 'current_gameweek' in st.session_state:
+            gw = st.session_state.get('current_gameweek')
+            if gw and gw > 0:
+                return gw
+        
+        # Return gameweek 4 as the current default instead of 20
+        return 4
+    
+    def _display_team_fixture_breakdown(self, team_fixtures, df):
+        """Display detailed team-by-team fixture breakdown"""
+        st.subheader("📋 Team-by-Team Fixture Breakdown")
+        
+        # Sort teams by difficulty (easiest first)
+        sorted_teams = sorted(team_fixtures.items(), key=lambda x: x[1]['average_difficulty'])
+        
+        for team_name, fixtures_data in sorted_teams:
+            with st.expander(f"⚽ {team_name} - {fixtures_data['rating']} ({fixtures_data['average_difficulty']:.1f} avg)"):
+                
+                # Show next 5 fixtures
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.write("**Next 5 Fixtures:**")
+                    current_gw = self._get_current_gameweek()
+                    for i, fixture in enumerate(fixtures_data['fixtures']):
+                        home_away = "🏠 vs" if fixture['home'] else "✈️ @"
+                        difficulty_emoji = "🟢" if fixture['difficulty'] <= 2 else "🟡" if fixture['difficulty'] == 3 else "🔴"
+                        gw_num = current_gw + i
+                        st.write(f"GW{gw_num}: {home_away} {fixture['opponent']} {difficulty_emoji} ({fixture['difficulty_text']})")
+                
+                with col2:
+                    st.metric("Average Difficulty", f"{fixtures_data['average_difficulty']:.1f}")
+                    st.metric("Total Difficulty", fixtures_data['total_difficulty'])
+                    
+                    # Show top players from this team
+                    team_players = df[df['team_short_name'] == team_name]
+                    if not team_players.empty:
+                        top_players = team_players.nlargest(3, 'total_points')
+                        st.write("**Top Players:**")
+                        for _, player in top_players.iterrows():
+                            st.write(f"• {player.get('web_name', 'Unknown')}")
+    
+    def _display_attack_recommendations(self, team_attack_fixtures, df):
+        """Display attack-specific recommendations"""
+        st.subheader("⚔️ Attack Fixture Recommendations")
+        
+        # Sort teams by attack difficulty (easiest first)
+        sorted_attack_teams = sorted(team_attack_fixtures.items(), 
+                                   key=lambda x: x[1]['avg_attack_difficulty'])
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.success("🟢 **Best Attack Fixtures**")
+            st.write("*Target attacking players from these teams*")
+            
+            for team_name, fixtures_data in sorted_attack_teams[:5]:
+                team_players = df[df['team_short_name'] == team_name]
+                if not team_players.empty:
+                    # Get top attacking players
+                    attacking_players = team_players[team_players['position_name'].isin(['Midfielder', 'Forward'])]
+                    if not attacking_players.empty:
+                        top_attacker = attacking_players.nlargest(1, 'total_points').iloc[0]
+                        st.write(f"• **{team_name}** ({fixtures_data['avg_attack_difficulty']:.1f}) - {top_attacker['web_name']}")
+        
+        with col2:
+            st.error("🔴 **Difficult Attack Fixtures**")
+            st.write("*Consider benching attacking players from these teams*")
+            
+            for team_name, fixtures_data in sorted_attack_teams[-5:]:
+                team_players = df[df['team_short_name'] == team_name]
+                if not team_players.empty:
+                    attacking_players = team_players[team_players['position_name'].isin(['Midfielder', 'Forward'])]
+                    if not attacking_players.empty:
+                        top_attacker = attacking_players.nlargest(1, 'total_points').iloc[0]
+                        st.write(f"• **{team_name}** ({fixtures_data['avg_attack_difficulty']:.1f}) - {top_attacker['web_name']}")
+    
+    def _display_defense_recommendations(self, team_defense_fixtures, df):
+        """Display defense-specific recommendations"""
+        st.subheader("🛡️ Defense Fixture Recommendations")
+        
+        # Sort teams by defense difficulty (easiest first)
+        sorted_defense_teams = sorted(team_defense_fixtures.items(), 
+                                    key=lambda x: x[1]['avg_defense_difficulty'])
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.success("🟢 **Best Defense Fixtures**")
+            st.write("*Target defensive players from these teams*")
+            
+            for team_name, fixtures_data in sorted_defense_teams[:5]:
+                team_players = df[df['team_short_name'] == team_name]
+                if not team_players.empty:
+                    # Get top defensive players
+                    defensive_players = team_players[team_players['position_name'].isin(['Goalkeeper', 'Defender'])]
+                    if not defensive_players.empty:
+                        top_defender = defensive_players.nlargest(1, 'total_points').iloc[0]
+                        st.write(f"• **{team_name}** ({fixtures_data['avg_defense_difficulty']:.1f}) - {top_defender['web_name']}")
+        
+        with col2:
+            st.error("🔴 **Difficult Defense Fixtures**")
+            st.write("*Consider benching defensive players from these teams*")
+            
+            for team_name, fixtures_data in sorted_defense_teams[-5:]:
+                team_players = df[df['team_short_name'] == team_name]
+                if not team_players.empty:
+                    defensive_players = team_players[team_players['position_name'].isin(['Goalkeeper', 'Defender'])]
+                    if not defensive_players.empty:
+                        top_defender = defensive_players.nlargest(1, 'total_points').iloc[0]
+                        st.write(f"• **{team_name}** ({fixtures_data['avg_defense_difficulty']:.1f}) - {top_defender['web_name']}")
     
     def _display_attack_defense_analysis(self, df):
         """Display attacking and defensive fixture analysis"""

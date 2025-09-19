@@ -2,7 +2,7 @@ str# Enhanced FPL Analytics Dashboard - Requirements
 # Core Streamlit and Data Processing
 streamlit>=1.28.0
 pandas>=2.0.0
-numpy>=1.24.0
+numpy>=2.3.3
 requests>=2.31.0
 
 # Data Visualization

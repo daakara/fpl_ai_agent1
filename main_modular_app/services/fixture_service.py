@@ -86,25 +86,29 @@ class FixtureService:
     
     def get_upcoming_fixtures_difficulty(self, team_short_name: str, gameweeks: int = 5) -> Dict:
         """
-        Get fixture difficulty for upcoming gameweeks
+        Get fixture difficulty for upcoming gameweeks (current GW + next 4)
         
         Args:
             team_short_name: Team's short name
-            gameweeks: Number of upcoming gameweeks to analyze
+            gameweeks: Number of upcoming gameweeks to analyze (default 5 for current + next 4)
             
         Returns:
             Dictionary with fixture difficulty analysis
         """
         # This would integrate with actual fixture data in production
-        # For now, providing a simplified implementation
+        # For now, providing a simplified implementation with current GW + next 4
+        
+        # Get current gameweek from session state or default
+        current_gw = st.session_state.get('current_gameweek', 20)
         
         # Sample upcoming opponents (would be fetched from API)
+        # Representing current GW + next 4 GWs
         sample_fixtures = [
-            {'opponent': 'MCI', 'home': False, 'gameweek': 20},
-            {'opponent': 'BRE', 'home': True, 'gameweek': 21},
-            {'opponent': 'LIV', 'home': False, 'gameweek': 22},
-            {'opponent': 'SOU', 'home': True, 'gameweek': 23},
-            {'opponent': 'TOT', 'home': False, 'gameweek': 24}
+            {'opponent': 'MCI', 'home': False, 'gameweek': current_gw},
+            {'opponent': 'BRE', 'home': True, 'gameweek': current_gw + 1},
+            {'opponent': 'LIV', 'home': False, 'gameweek': current_gw + 2},
+            {'opponent': 'SOU', 'home': True, 'gameweek': current_gw + 3},
+            {'opponent': 'TOT', 'home': False, 'gameweek': current_gw + 4}
         ]
         
         fixtures_analysis = []

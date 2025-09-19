@@ -107,6 +107,7 @@ class EnhancedFPLAppController:
             'teams_df': pd.DataFrame(),
             'fdr_data_loaded': False,
             'fixtures_df': pd.DataFrame(),
+            'current_gameweek': 4,  # Set default current gameweek to 4
             'user_preferences': {},
             'performance_mode': 'standard',
             'theme': 'light',

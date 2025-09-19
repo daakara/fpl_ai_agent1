@@ -229,3 +229,45 @@
 2025-09-19 23:26:03,078 - fpl_analytics - INFO - Performance - page_render_my_team: 0.79s
 2025-09-19 23:26:03,085 - fpl_analytics - INFO - Performance - app_run: 0.83s - {'page': 'my_team'}
 2025-09-19 23:27:28,772 - fpl_analytics - INFO - Performance - page_render_my_team: 0.87s
+2025-09-19 23:27:28,780 - fpl_analytics - INFO - Performance - app_run: 0.91s - {'page': 'my_team'}
+2025-09-19 23:27:58,869 - fpl_analytics - INFO - Performance - page_render_my_team: 0.37s
+2025-09-19 23:27:58,872 - fpl_analytics - INFO - Performance - app_run: 0.38s - {'page': 'my_team'}
+2025-09-19 23:28:02,094 - fpl_analytics - INFO - Performance - page_render_my_team: 0.36s
+2025-09-19 23:28:02,095 - fpl_analytics - INFO - Performance - app_run: 0.37s - {'page': 'my_team'}
+2025-09-19 23:28:03,375 - fpl_analytics - INFO - Performance - page_render_my_team: 0.49s
+2025-09-19 23:28:03,375 - fpl_analytics - INFO - Performance - app_run: 0.50s - {'page': 'my_team'}
+2025-09-19 23:28:34,247 - fpl_analytics - INFO - Performance - page_render_fixtures: 2.03s
+2025-09-19 23:28:34,252 - fpl_analytics - INFO - Performance - app_run: 2.05s - {'page': 'fixtures'}
+2025-09-19 23:35:02,126 - fpl_analytics - INFO - Performance - page_render_dashboard: 0.00s
+2025-09-19 23:35:02,135 - fpl_analytics - INFO - Performance - app_run: 0.04s - {'page': 'dashboard'}
+2025-09-19 23:40:15,991 - fpl_analytics - INFO - Performance - page_render_dashboard: 0.00s
+2025-09-19 23:40:15,998 - fpl_analytics - INFO - Performance - app_run: 0.03s - {'page': 'dashboard'}
+2025-09-20 00:03:32,855 - fpl_analytics - INFO - Performance - page_render_fixtures: 0.76s
+2025-09-20 00:03:32,855 - fpl_analytics - INFO - Performance - app_run: 0.77s - {'page': 'fixtures'}
+2025-09-20 00:11:15,190 - fpl_analytics - INFO - Performance - page_render_dashboard: 0.00s
+2025-09-20 00:11:15,195 - fpl_analytics - INFO - Performance - app_run: 0.02s - {'page': 'dashboard'}
+2025-09-20 00:11:31,999 - fpl_analytics - INFO - Performance - page_render_dashboard: 0.00s
+2025-09-20 00:11:32,010 - fpl_analytics - INFO - Performance - app_run: 0.04s - {'page': 'dashboard'}
+2025-09-20 00:12:37,197 - fpl_analytics - INFO - User Action: data_refresh - Details: {'success': True}
+2025-09-20 00:12:37,456 - fpl_analytics - INFO - Performance - page_render_dashboard: 0.25s
+2025-09-20 00:12:37,461 - fpl_analytics - INFO - Performance - app_run: 21.65s - {'page': 'dashboard'}
+2025-09-20 00:13:16,314 - fpl_analytics - ERROR - Error in app_controller_run: {'error_type': 'NameError', 'error_message': "name 'df' is not defined", 'context': 'app_controller_run', 'traceback': 'Traceback (most recent call last):\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\core\\app_controller.py", line 171, in run\n    self.pages["fixture_analysis"].render()\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\pages\\fixture_analysis_page.py", line 67, in render\n    self._display_overall_fixture_difficulty(df)\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\pages\\fixture_analysis_page.py", line 105, in _display_overall_fixture_difficulty\n    self._display_overall_difficulty_heatmap(df, all_teams)\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\pages\\fixture_analysis_page.py", line 200, in _display_overall_difficulty_heatmap\n    self._display_team_fixture_breakdown(team_fixtures, df)\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\pages\\fixture_analysis_page.py", line 505, in _display_team_fixture_breakdown\n    team_players = df[df[\'team_short_name\'] == team_name]\n                   ^^\nNameError: name \'df\' is not defined\n'}
+2025-09-20 00:13:16,315 - fpl_analytics - INFO - Performance - app_run: 0.93s - {'page': 'fixtures'}
+2025-09-20 00:13:16,319 - fpl_analytics - ERROR - Error in run: {'error_type': 'NameError', 'error_message': "name 'df' is not defined", 'context': 'run', 'traceback': 'Traceback (most recent call last):\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\utils\\error_handling.py", line 99, in wrapper\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\core\\app_controller.py", line 171, in run\n    self.pages["fixture_analysis"].render()\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\pages\\fixture_analysis_page.py", line 67, in render\n    self._display_overall_fixture_difficulty(df)\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\pages\\fixture_analysis_page.py", line 105, in _display_overall_fixture_difficulty\n    self._display_overall_difficulty_heatmap(df, all_teams)\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\pages\\fixture_analysis_page.py", line 200, in _display_overall_difficulty_heatmap\n    self._display_team_fixture_breakdown(team_fixtures, df)\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\pages\\fixture_analysis_page.py", line 505, in _display_team_fixture_breakdown\n    team_players = df[df[\'team_short_name\'] == team_name]\n                   ^^\nNameError: name \'df\' is not defined\n'}
+2025-09-20 00:14:55,942 - fpl_analytics - INFO - Performance - app_run: 4.07s - {'page': 'my_team'}
+2025-09-20 00:14:56,307 - fpl_analytics - INFO - Performance - page_render_my_team: 1.63s
+2025-09-20 00:14:56,322 - fpl_analytics - INFO - Performance - app_run: 1.66s - {'page': 'my_team'}
+2025-09-20 00:15:03,955 - fpl_analytics - INFO - Performance - app_run: 6.34s - {'page': 'my_team'}
+2025-09-20 00:15:04,499 - fpl_analytics - INFO - Performance - page_render_my_team: 0.41s
+2025-09-20 00:15:04,501 - fpl_analytics - INFO - Performance - app_run: 0.43s - {'page': 'my_team'}
+2025-09-20 00:16:10,394 - fpl_analytics - INFO - Performance - page_render_my_team: 0.43s
+2025-09-20 00:16:10,394 - fpl_analytics - INFO - Performance - app_run: 0.44s - {'page': 'my_team'}
+2025-09-20 00:16:26,305 - fpl_analytics - INFO - Performance - page_render_my_team: 0.36s
+2025-09-20 00:16:26,305 - fpl_analytics - INFO - Performance - app_run: 0.38s - {'page': 'my_team'}
+2025-09-20 00:16:27,137 - fpl_analytics - INFO - Performance - page_render_my_team: 0.40s
+2025-09-20 00:16:27,138 - fpl_analytics - INFO - Performance - app_run: 0.41s - {'page': 'my_team'}
+2025-09-20 00:16:43,958 - fpl_analytics - INFO - Performance - page_render_ai_recommendations: 0.03s
+2025-09-20 00:16:43,968 - fpl_analytics - INFO - Performance - app_run: 0.05s - {'page': 'ai_recommendations'}
+2025-09-20 00:16:53,819 - fpl_analytics - INFO - Performance - page_render_team_builder: 0.01s
+2025-09-20 00:16:53,824 - fpl_analytics - INFO - Performance - app_run: 0.03s - {'page': 'team_builder'}
+2025-09-20 00:17:01,313 - fpl_analytics - INFO - Performance - page_render_players: 0.26s
