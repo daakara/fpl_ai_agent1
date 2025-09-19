@@ -1,4 +1,4 @@
-str# Enhanced FPL Analytics Dashboard - Requirements
+# Enhanced FPL Analytics Dashboard - Requirements
 # Core Streamlit and Data Processing
 streamlit>=1.28.0
 pandas>=2.0.0

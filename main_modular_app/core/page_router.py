@@ -15,6 +15,7 @@ class PageRouter:
             "🎯 Fixture Difficulty": "fixtures",
             "👤 My FPL Team": "my_team",
             "🤖 AI Recommendations": "ai_recommendations",
+            "🔄 Smart Iteration AI": "automated_iteration",
             "⚽ Team Builder": "team_builder",
         }
     

@@ -720,3 +720,32 @@ class EnhancedFPLAppController:
             except Exception as e:
                 st.error(f"Error exporting data: {str(e)}")
                 logger.log_error(e, "data_export")
+    
+    def render_automated_iteration_page(self):
+        """Render the automated iteration recommendations page"""
+        if not st.session_state.data_loaded:
+            st.warning("⚠️ Please load FPL data first to use automated recommendations.")
+            if st.button("Load Data Now"):
+                st.switch_page("dashboard")
+            return
+        
+        # Import the UI components for automated iteration
+        from components.automated_iteration_ui import (
+            render_automated_recommendations_tab,
+            render_feedback_summary,
+            display_automated_iteration_help
+        )
+        
+        # Create tabs for different sections
+        tab1, tab2, tab3 = st.tabs(["🤖 AI Recommendations", "📊 Feedback Analysis", "❓ Help"])
+        
+        with tab1:
+            render_automated_recommendations_tab(st.session_state.players_df)
+        
+        with tab2:
+            render_feedback_summary()
+        
+        with tab3:
+            display_automated_iteration_help()
+</copilot-edited-file>
+```
