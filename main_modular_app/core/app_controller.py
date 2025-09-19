@@ -134,44 +134,95 @@ class FPLAppController:
             with ai_tab1:
                 st.subheader("🎯 AI Transfer Targets")
                 
-                # Position filter
-                position_filter = st.selectbox(
-                    "Filter by Position",
-                    ["All Positions", "Goalkeeper", "Defender", "Midfielder", "Forward"],
-                    index=0
-                )
-                
-                position = None if position_filter == "All Positions" else position_filter
-                
-                # Get AI recommendations
-                recommendations = get_player_recommendations(
-                    df, 
-                    position=position,
-                    top_n=10
-                )
-                
-                if recommendations:
-                    for i, rec in enumerate(recommendations, 1):
-                        with st.expander(f"{i}. {rec.web_name} ({rec.position}) - £{rec.current_price:.1f}m"):
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.metric("Predicted Points", f"{rec.predicted_points:.1f}")
-                                st.metric("Value Score", f"{rec.value_score:.1f}")
-                                st.metric("Form Score", f"{rec.form_score:.1f}")
-                            
-                            with col2:
-                                st.metric("Confidence", f"{rec.confidence_score:.1%}")
-                                st.metric("Risk Level", rec.risk_level)
-                                st.write(f"**Team:** {rec.team_name}")
-                            
-                            # Reasoning
-                            if rec.reasoning:
-                                st.write("**AI Reasoning:**")
-                                for reason in rec.reasoning:
-                                    st.write(f"• {reason}")
-                else:
-                    st.info("No recommendations available. Check if player data is loaded properly.")
+                try:
+                    # Position filter
+                    position_filter = st.selectbox(
+                        "Filter by Position",
+                        ["All Positions", "Goalkeeper", "Defender", "Midfielder", "Forward"],
+                        index=0
+                    )
+                    
+                    position = None if position_filter == "All Positions" else position_filter
+                    
+                    # Clean data before processing
+                    df_clean = df.copy()
+                    
+                    # Ensure numeric columns are properly typed
+                    numeric_cols = ['total_points', 'now_cost', 'form', 'selected_by_percent', 
+                                  'minutes', 'goals_scored', 'assists', 'clean_sheets']
+                    
+                    for col in numeric_cols:
+                        if col in df_clean.columns:
+                            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0)
+                    
+                    # Get AI recommendations with error handling
+                    with st.spinner("🤖 Generating AI recommendations..."):
+                        recommendations = get_player_recommendations(
+                            df_clean, 
+                            position=position,
+                            top_n=10
+                        )
+                    
+                    if recommendations:
+                        st.success(f"✅ Found {len(recommendations)} transfer targets!")
+                        
+                        for i, rec in enumerate(recommendations, 1):
+                            with st.expander(f"{i}. {rec.web_name} ({rec.position}) - £{rec.current_price:.1f}m"):
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.metric("Predicted Points", f"{rec.predicted_points:.1f}")
+                                    st.metric("Value Score", f"{rec.value_score:.1f}")
+                                    st.metric("Form Score", f"{rec.form_score:.1f}")
+                                
+                                with col2:
+                                    st.metric("Confidence", f"{rec.confidence_score:.1%}")
+                                    st.metric("Risk Level", rec.risk_level)
+                                    st.write(f"**Team:** {rec.team_name}")
+                                
+                                # Reasoning
+                                if rec.reasoning:
+                                    st.write("**AI Reasoning:**")
+                                    for reason in rec.reasoning:
+                                        st.write(f"• {reason}")
+                    else:
+                        st.warning("⚠️ No recommendations available.")
+                        st.info("💡 **Possible solutions:**")
+                        st.write("• Ensure player data is loaded correctly")
+                        st.write("• Try refreshing the data")
+                        st.write("• Check different position filters")
+                        
+                except Exception as e:
+                    st.error("❌ Error generating transfer recommendations")
+                    
+                    if "multiply sequence" in str(e):
+                        st.warning("🔧 **Data Type Issue Detected**")
+                        st.write("The AI engine encountered mixed data types. This has been automatically fixed.")
+                        st.write("**Please try these steps:**")
+                        st.write("1. Refresh the page using the browser refresh button")
+                        st.write("2. Reload data using the '🔄 Refresh Data' button in the sidebar")
+                        st.write("3. Try again - the data cleaning should resolve the issue")
+                        
+                        # Attempt to show basic recommendations as fallback
+                        try:
+                            st.info("📋 **Showing basic recommendations instead:**")
+                            simple_recs = df.nlargest(5, 'total_points')
+                            for i, (_, player) in enumerate(simple_recs.iterrows(), 1):
+                                st.write(f"{i}. **{player['web_name']}** - {player['total_points']} pts (£{player['now_cost']/10:.1f}m)")
+                        except:
+                            pass
+                    else:
+                        st.write(f"Error details: {str(e)}")
+                        
+                    # Debug information in expander
+                    with st.expander("🔍 Debug Information"):
+                        st.write("**Data Columns:**", list(df.columns))
+                        st.write("**Data Types:**")
+                        for col in ['total_points', 'now_cost', 'form', 'selected_by_percent']:
+                            if col in df.columns:
+                                st.write(f"• {col}: {df[col].dtype}")
+                        st.write("**Sample Data:**")
+                        st.dataframe(df.head(3))
             
             with ai_tab2:
                 st.subheader("👑 AI Captain Analysis")

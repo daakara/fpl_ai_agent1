@@ -306,22 +306,38 @@ class AdvancedMLRecommendationEngine:
         try:
             df = players_df.copy()
             
-            # Ensure required columns exist
+            # Ensure required columns exist and are numeric
             required_cols = ['total_points', 'now_cost', 'form', 'selected_by_percent']
             for col in required_cols:
                 if col not in df.columns:
                     df[col] = 0
+                else:
+                    # Convert to numeric, handling any string values
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+            # Additional numeric columns that might cause issues
+            numeric_cols = ['minutes', 'goals_scored', 'assists', 'clean_sheets',
+                          'bonus', 'bps', 'influence', 'creativity', 'threat', 'ict_index']
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
             # 1. Value Score (Points per Million with form adjustment)
-            df['base_value'] = df['total_points'] / df['now_cost'].replace(0, 1)
-            df['form_multiplier'] = 1 + (pd.to_numeric(df['form'], errors='coerce').fillna(0) - 5) * 0.1
+            # Ensure now_cost is never zero to avoid division by zero
+            df['now_cost_safe'] = df['now_cost'].replace(0, 1)
+            df['base_value'] = df['total_points'] / df['now_cost_safe']
+            
+            # Handle form conversion safely
+            df['form_numeric'] = pd.to_numeric(df['form'], errors='coerce').fillna(0)
+            df['form_multiplier'] = 1 + (df['form_numeric'] - 5) * 0.1
             df['value_score'] = df['base_value'] * df['form_multiplier']
             
             # 2. Form Score (Recent performance trend)
-            df['form_numeric'] = pd.to_numeric(df['form'], errors='coerce').fillna(0)
             df['form_score'] = np.clip(df['form_numeric'] / 10, 0, 1)
             
             # 3. Ownership Score (Differential potential)
+            # Ensure selected_by_percent is numeric
+            df['selected_by_percent'] = pd.to_numeric(df['selected_by_percent'], errors='coerce').fillna(0)
             df['ownership_score'] = np.where(
                 df['selected_by_percent'] < 5, 1.0,  # High differential value
                 np.where(df['selected_by_percent'] < 15, 0.8,  # Medium differential
@@ -333,7 +349,8 @@ class AdvancedMLRecommendationEngine:
             df['fixture_score'] = 0.7  # Default neutral score
             
             # 5. Risk Level Assessment
-            df['minutes_reliability'] = np.clip(df.get('minutes', 0) / 2500, 0, 1)  # Based on season minutes
+            df['minutes'] = pd.to_numeric(df.get('minutes', 0), errors='coerce').fillna(0)
+            df['minutes_reliability'] = np.clip(df['minutes'] / 2500, 0, 1)  # Based on season minutes
             df['price_risk'] = np.where(df['now_cost'] > 10, 0.3, 0.7)  # Premium players higher risk
             df['rotation_risk'] = 1 - df['minutes_reliability']
             
@@ -341,11 +358,19 @@ class AdvancedMLRecommendationEngine:
                               df['price_risk'] * 0.3 + 
                               (1 - df['rotation_risk']) * 0.2)
             
-            df['risk_level'] = pd.cut(df['risk_score'], 
-                                    bins=[0, 0.3, 0.6, 1.0], 
-                                    labels=['High', 'Medium', 'Low'])
+            # Create risk level categories safely
+            try:
+                df['risk_level'] = pd.cut(df['risk_score'], 
+                                        bins=[0, 0.3, 0.6, 1.0], 
+                                        labels=['High', 'Medium', 'Low'])
+            except Exception:
+                df['risk_level'] = 'Medium'  # Default fallback
             
             # 6. Overall Recommendation Score
+            # Ensure all score components are numeric
+            for score_col in ['value_score', 'form_score', 'fixture_score', 'ownership_score', 'risk_score']:
+                df[score_col] = pd.to_numeric(df[score_col], errors='coerce').fillna(0)
+            
             df['recommendation_score'] = (
                 df['value_score'] * self.weights['value_efficiency'] +
                 df['form_score'] * self.weights['form_trend'] +
@@ -354,14 +379,23 @@ class AdvancedMLRecommendationEngine:
                 df['risk_score'] * 0.1
             )
             
-            # Normalize to 0-100 scale
+            # Normalize to 0-100 scale safely
+            df['recommendation_score'] = pd.to_numeric(df['recommendation_score'], errors='coerce').fillna(0)
             df['recommendation_score'] = np.clip(df['recommendation_score'] * 10, 0, 100)
             
             return df
             
         except Exception as e:
             self.logger.error(f"Error calculating scores: {e}")
-            return players_df
+            # Return original dataframe with basic score columns to prevent total failure
+            df = players_df.copy()
+            df['recommendation_score'] = 50  # Default neutral score
+            df['value_score'] = 0
+            df['form_score'] = 0.5
+            df['fixture_score'] = 0.7
+            df['ownership_score'] = 0.5
+            df['risk_level'] = 'Medium'
+            return df
     
     def generate_player_recommendations(self, players_df: pd.DataFrame, 
                                       position_filter: Optional[str] = None,
