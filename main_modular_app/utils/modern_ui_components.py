@@ -213,8 +213,16 @@ class NavigationManager:
                 "team_builder": "🏗️ Team Builder"
             }
             
+            # Get unique recent pages to avoid duplicate keys
+            unique_recent_pages = []
+            seen_pages = set()
             for page in reversed(self.navigation_history[-5:]):
-                if st.sidebar.button(page_names.get(page, page), key=f"recent_{page}"):
+                if page not in seen_pages:
+                    unique_recent_pages.append(page)
+                    seen_pages.add(page)
+            
+            for i, page in enumerate(unique_recent_pages):
+                if st.sidebar.button(page_names.get(page, page), key=f"recent_{page}_{i}"):
                     return page
         
         return None

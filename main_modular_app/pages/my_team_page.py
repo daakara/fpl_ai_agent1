@@ -43,7 +43,7 @@ class MyTeamPage:
             st.metric("Team Value", f"£{team_data.get('value', 1000)/10:.1f}m")
         
         # Team analysis tabs
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
             "👥 Current Squad", 
             "📊 Performance Analysis", 
             "💡 Recommendations",
@@ -51,8 +51,7 @@ class MyTeamPage:
             "🎯 SWOT Analysis",
             "📈 Advanced Analytics",
             "🔄 Transfer Planning",
-            "📊 Performance Comparison",
-            "⚽ Fixture Analysis"
+            "📊 Performance Comparison"
         ])
         
         with tab1:
@@ -78,9 +77,6 @@ class MyTeamPage:
         
         with tab8:
             self._display_performance_comparison(team_data)
-        
-        with tab9:
-            self._display_fixture_analysis(team_data)
         
         # Reset team button
         if st.button("🔄 Load Different Team"):

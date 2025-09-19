@@ -127,8 +127,12 @@ class EnhancedFPLAppController:
     def run(self):
         """Enhanced application runner with error handling and performance monitoring"""
         start_time = time.time()
+        selected_page = "dashboard"  # Initialize with default value
         
         try:
+            # Ensure session state is properly initialized
+            self.initialize_session_state()
+            
             # Render header
             self.render_enhanced_header()
             
@@ -193,7 +197,7 @@ class EnhancedFPLAppController:
             raise
         
         finally:
-            # Log performance
+            # Log performance - selected_page is now always defined
             execution_time = time.time() - start_time
             logger.log_performance("app_run", execution_time, {"page": selected_page})
     
@@ -438,4 +442,278 @@ class EnhancedFPLAppController:
         </div>
         """, unsafe_allow_html=True)
     
-    # ...existing methods...
+    def render_ai_recommendations(self):
+        """Render AI recommendations page"""
+        st.markdown("### 🤖 AI-Powered Player Recommendations")
+        
+        if not st.session_state.data_loaded:
+            st.warning("⚠️ Please load FPL data first to get AI recommendations.")
+            if st.button("Load Data Now"):
+                st.switch_page("dashboard")
+            return
+        
+        df = st.session_state.players_df
+        
+        # Add filter options
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            position_filter = st.selectbox(
+                "Filter by Position",
+                ["All"] + list(df['position_name'].unique()) if 'position_name' in df.columns else ["All"],
+                index=0
+            )
+        
+        with col2:
+            budget_max = st.number_input(
+                "Max Budget (£m)",
+                min_value=4.0,
+                max_value=15.0,
+                value=12.0,
+                step=0.5
+            )
+        
+        with col3:
+            top_n = st.selectbox(
+                "Number of Recommendations",
+                [5, 10, 15, 20],
+                index=1
+            )
+        
+        try:
+            # Get AI recommendations
+            position = None if position_filter == "All" else position_filter
+            recommendations = get_player_recommendations(
+                df, 
+                position=position, 
+                budget=budget_max, 
+                top_n=top_n
+            )
+            
+            if recommendations:
+                st.success(f"🎯 Generated {len(recommendations)} AI recommendations!")
+                
+                # Display recommendations
+                for i, rec in enumerate(recommendations, 1):
+                    with st.expander(f"#{i} Recommendation: {rec.web_name} ({rec.team_name})"):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.metric("Price", f"£{rec.current_price:.1f}m")
+                            st.metric("Total Points", int(rec.predicted_points))
+                            st.metric("Position", rec.position)
+                        
+                        with col2:
+                            st.metric("Value Score", f"{rec.value_score:.2f}")
+                            st.metric("Form Score", f"{rec.form_score:.2f}")
+                            st.metric("Risk Level", rec.risk_level)
+                        
+                        # Show confidence and ownership
+                        conf_col1, conf_col2 = st.columns(2)
+                        with conf_col1:
+                            st.metric("Confidence", f"{rec.confidence_score:.1%}")
+                        with conf_col2:
+                            st.metric("Expected ROI", f"{rec.expected_roi:.1f}%")
+                        
+                        # Display reasoning
+                        if rec.reasoning:
+                            st.markdown("**🧠 AI Reasoning:**")
+                            for reason in rec.reasoning:
+                                st.write(f"• {reason}")
+                        else:
+                            st.write("**Recommendation:** Strong statistical performance indicates good value.")
+                
+                # Summary statistics
+                st.markdown("### 📊 Recommendation Summary")
+                
+                avg_price = sum(rec.current_price for rec in recommendations) / len(recommendations)
+                avg_value_score = sum(rec.value_score for rec in recommendations) / len(recommendations)
+                risk_distribution = {}
+                for rec in recommendations:
+                    risk_distribution[rec.risk_level] = risk_distribution.get(rec.risk_level, 0) + 1
+                
+                summary_col1, summary_col2, summary_col3 = st.columns(3)
+                
+                with summary_col1:
+                    st.metric("Average Price", f"£{avg_price:.1f}m")
+                
+                with summary_col2:
+                    st.metric("Average Value Score", f"{avg_value_score:.1f}")
+                
+                with summary_col3:
+                    most_common_risk = max(risk_distribution.items(), key=lambda x: x[1])[0]
+                    st.metric("Most Common Risk", most_common_risk)
+                
+                # Risk distribution chart
+                if len(risk_distribution) > 1:
+                    st.markdown("#### Risk Level Distribution")
+                    st.bar_chart(risk_distribution)
+            
+            else:
+                st.info("No recommendations available with the current filters.")
+        
+        except Exception as e:
+            st.error(f"Error generating recommendations: {str(e)}")
+            st.info("💡 Try loading fresh data or adjusting your filters.")
+            logger.log_error(e, "ai_recommendations")
+    
+    def render_team_builder(self):
+        """Render team builder page"""
+        st.markdown("### 🏗️ Team Builder")
+        
+        if not st.session_state.data_loaded:
+            st.warning("⚠️ Please load FPL data first to use the team builder.")
+            if st.button("Load Data Now"):
+                st.switch_page("dashboard")
+            return
+        
+        st.info("🚧 Team Builder feature is coming soon! This will allow you to build and optimize your FPL team.")
+        
+        # Placeholder for team builder functionality
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Available Features (Coming Soon)")
+            st.write("- 🎯 Optimal team selection")
+            st.write("- 💰 Budget optimization")
+            st.write("- 🔄 Transfer planning")
+            st.write("- 📊 Team analysis")
+        
+        with col2:
+            st.markdown("#### Current Status")
+            st.write("- ✅ Data loading")
+            st.write("- ✅ Player analysis")
+            st.write("- 🚧 Team optimization (in development)")
+            st.write("- 🚧 Budget management (in development)")
+    
+    def render_settings_page(self):
+        """Render settings and preferences page"""
+        st.markdown("### ⚙️ Settings & Preferences")
+        
+        # Theme settings
+        st.markdown("#### 🎨 Theme Settings")
+        theme = st.selectbox(
+            "Choose theme",
+            ["light", "dark", "auto"],
+            index=0 if st.session_state.theme == "light" else 1
+        )
+        if theme != st.session_state.theme:
+            st.session_state.theme = theme
+            st.success(f"Theme updated to {theme}")
+        
+        # Performance settings
+        st.markdown("#### ⚡ Performance Settings")
+        performance_mode = st.selectbox(
+            "Performance Mode",
+            ["standard", "fast", "detailed"],
+            index=["standard", "fast", "detailed"].index(st.session_state.performance_mode)
+        )
+        if performance_mode != st.session_state.performance_mode:
+            st.session_state.performance_mode = performance_mode
+            st.success(f"Performance mode updated to {performance_mode}")
+        
+        # Debug settings
+        st.markdown("#### 🔧 Debug Settings")
+        debug_mode = st.checkbox(
+            "Enable debug mode",
+            value=st.session_state.debug_mode
+        )
+        if debug_mode != st.session_state.debug_mode:
+            st.session_state.debug_mode = debug_mode
+            st.success(f"Debug mode {'enabled' if debug_mode else 'disabled'}")
+        
+        # Feature flags
+        st.markdown("#### 🚀 Feature Flags")
+        for feature, enabled in st.session_state.feature_flags.items():
+            new_value = st.checkbox(
+                f"Enable {feature.replace('_', ' ').title()}",
+                value=enabled,
+                key=f"feature_{feature}"
+            )
+            if new_value != enabled:
+                st.session_state.feature_flags[feature] = new_value
+                st.success(f"{feature.replace('_', ' ').title()} {'enabled' if new_value else 'disabled'}")
+        
+        # Data management
+        st.markdown("#### 📊 Data Management")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🔄 Refresh All Data"):
+                self.handle_quick_action("refresh_data")
+        
+        with col2:
+            if st.button("💾 Export Data"):
+                self.handle_quick_action("export_data")
+        
+        # Cache management
+        st.markdown("#### 🗄️ Cache Management")
+        cache_info = {
+            "Cache Status": "Enabled" if config.cache.enabled else "Disabled",
+            "TTL": f"{config.cache.ttl_seconds} seconds",
+            "Max Size": f"{config.cache.max_size_mb} MB"
+        }
+        st.json(cache_info)
+        
+        if st.button("🗑️ Clear Cache"):
+            try:
+                from utils.enhanced_cache import cache_manager
+                cache_manager.clear_cache()
+                st.success("Cache cleared successfully!")
+            except Exception as e:
+                st.error(f"Error clearing cache: {str(e)}")
+    
+    def export_current_data(self):
+        """Export current data to various formats"""
+        st.markdown("### 💾 Export Data")
+        
+        if not st.session_state.data_loaded:
+            st.warning("No data to export. Please load data first.")
+            return
+        
+        df = st.session_state.players_df
+        
+        export_format = st.selectbox(
+            "Choose export format",
+            ["CSV", "Excel", "JSON"]
+        )
+        
+        if st.button(f"Export as {export_format}"):
+            try:
+                import io
+                
+                if export_format == "CSV":
+                    csv_buffer = io.StringIO()
+                    df.to_csv(csv_buffer, index=False)
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=csv_buffer.getvalue(),
+                        file_name="fpl_players_data.csv",
+                        mime="text/csv"
+                    )
+                
+                elif export_format == "Excel":
+                    excel_buffer = io.BytesIO()
+                    df.to_excel(excel_buffer, index=False, engine='openpyxl')
+                    st.download_button(
+                        label="📥 Download Excel",
+                        data=excel_buffer.getvalue(),
+                        file_name="fpl_players_data.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                
+                elif export_format == "JSON":
+                    json_data = df.to_json(orient='records', indent=2)
+                    st.download_button(
+                        label="📥 Download JSON",
+                        data=json_data,
+                        file_name="fpl_players_data.json",
+                        mime="application/json"
+                    )
+                
+                st.success(f"Data exported successfully as {export_format}!")
+                logger.log_user_action("data_export", {"format": export_format, "rows": len(df)})
+                
+            except Exception as e:
+                st.error(f"Error exporting data: {str(e)}")
+                logger.log_error(e, "data_export")
