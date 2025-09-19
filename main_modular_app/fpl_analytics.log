@@ -271,3 +271,4 @@
 2025-09-20 00:16:53,819 - fpl_analytics - INFO - Performance - page_render_team_builder: 0.01s
 2025-09-20 00:16:53,824 - fpl_analytics - INFO - Performance - app_run: 0.03s - {'page': 'team_builder'}
 2025-09-20 00:17:01,313 - fpl_analytics - INFO - Performance - page_render_players: 0.26s
+2025-09-20 00:17:01,319 - fpl_analytics - INFO - Performance - app_run: 0.28s - {'page': 'players'}

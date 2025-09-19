@@ -174,6 +174,8 @@ class EnhancedFPLAppController:
                 self.pages["my_team"].render()
             elif selected_page == "ai_recommendations":
                 self.render_ai_recommendations()
+            elif selected_page == "automated_iteration":
+                self.render_automated_iteration_page()
             elif selected_page == "team_builder":
                 self.render_team_builder()
             elif selected_page == "settings":
