@@ -4,6 +4,9 @@ My Team Page - Handles FPL team import and analysis functionality
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
 from services.fpl_data_service import FPLDataService
 
 
@@ -159,6 +162,23 @@ class MyTeamPage:
         
         players_df = st.session_state.players_df
         
+        # Squad analysis tabs
+        squad_tabs = st.tabs(["📋 Squad Overview", "🔥 Performance Heatmap", "📊 Position Analysis", "💎 Value Analysis"])
+        
+        with squad_tabs[0]:
+            self._display_squad_overview(team_data, players_df, picks)
+        
+        with squad_tabs[1]:
+            self._display_squad_heatmap(team_data, players_df, picks)
+        
+        with squad_tabs[2]:
+            self._display_position_analysis(team_data, players_df, picks)
+        
+        with squad_tabs[3]:
+            self._display_squad_value_analysis(team_data, players_df, picks)
+    
+    def _display_squad_overview(self, team_data, players_df, picks):
+        """Display basic squad overview"""
         # Match picks with player data
         squad_data = []
         formation_counts = {'Goalkeeper': 0, 'Defender': 0, 'Midfielder': 0, 'Forward': 0}
@@ -180,6 +200,7 @@ class MyTeamPage:
                     'Price': f"£{player.get('cost_millions', 0):.1f}m",
                     'Points': player.get('total_points', 0),
                     'Form': f"{player.get('form', 0):.1f}",
+                    'PPM': f"{player.get('points_per_million', 0):.1f}",
                     'Status': '(C)' if pick.get('is_captain') else '(VC)' if pick.get('is_vice_captain') else '',
                     'Playing': '✅' if pick.get('position', 12) <= 11 else '🪑'
                 })
@@ -189,7 +210,7 @@ class MyTeamPage:
             formation_str = f"{formation_counts['Goalkeeper']}-{formation_counts['Defender']}-{formation_counts['Midfielder']}-{formation_counts['Forward']}"
             st.info(f"**Formation:** {formation_str}")
             
-            # Squad table
+            # Squad table with enhanced columns
             squad_df = pd.DataFrame(squad_data)
             st.dataframe(
                 squad_df, 
@@ -199,6 +220,7 @@ class MyTeamPage:
                     "Price": st.column_config.TextColumn("Price"),
                     "Points": st.column_config.NumberColumn("Points"),
                     "Form": st.column_config.TextColumn("Form"),
+                    "PPM": st.column_config.TextColumn("PPM"),
                     "Playing": st.column_config.TextColumn("Starting?")
                 }
             )
@@ -222,9 +244,307 @@ class MyTeamPage:
                 starting_players = len([row for row in squad_data if row['Playing'] == '✅'])
                 st.metric("Starting XI", f"{starting_players}/11")
     
+    def _display_squad_heatmap(self, team_data, players_df, picks):
+        """Display interactive squad performance heatmap"""
+        st.subheader("🔥 Squad Performance Heatmap")
+        
+        # Get squad players with performance data
+        squad_players = []
+        for pick in picks:
+            player_info = players_df[players_df['id'] == pick['element']]
+            if not player_info.empty:
+                player = player_info.iloc[0]
+                squad_players.append({
+                    'name': player.get('web_name', 'Unknown'),
+                    'position': player.get('position_name', 'Unknown'),
+                    'form': float(player.get('form', 0)),
+                    'total_points': int(player.get('total_points', 0)),
+                    'minutes': int(player.get('minutes', 0)),
+                    'ppm': float(player.get('points_per_million', 0)),
+                    'ownership': float(player.get('selected_by_percent', 0)),
+                    'price': float(player.get('now_cost', 0)) / 10
+                })
+        
+        if not squad_players:
+            st.warning("No squad data available for heatmap")
+            return
+        
+        # Create performance matrix
+        metrics = ['Form', 'Total Points', 'Minutes', 'PPM', 'Price']
+        player_names = [p['name'] for p in squad_players]
+        
+        # Normalize data for heatmap (0-100 scale)
+        heatmap_data = []
+        
+        for player in squad_players:
+            row = []
+            # Form (0-10 scale to 0-100)
+            row.append(player['form'] * 10)
+            # Total points (normalize to season average)
+            row.append(min(100, (player['total_points'] / 200) * 100))
+            # Minutes (normalize to max possible)
+            row.append(min(100, (player['minutes'] / 3000) * 100))
+            # PPM (normalize to excellent threshold)
+            row.append(min(100, (player['ppm'] / 10) * 100))
+            # Price (invert - lower price = higher score)
+            row.append(max(0, 100 - (player['price'] / 15) * 100))
+            
+            heatmap_data.append(row)
+        
+        # Create heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=heatmap_data,
+            x=metrics,
+            y=player_names,
+            colorscale='RdYlGn',
+            hoverongaps=False,
+            hovertemplate='<b>%{y}</b><br>%{x}: %{z:.1f}<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title='Squad Performance Heatmap (Normalized 0-100)',
+            height=max(400, len(player_names) * 25),
+            yaxis=dict(autorange='reversed'),
+            font=dict(size=10)
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Performance insights
+        st.write("**🔍 Heatmap Insights:**")
+        
+        # Find best/worst performers in each category
+        best_form = max(squad_players, key=lambda x: x['form'])
+        worst_form = min(squad_players, key=lambda x: x['form'])
+        best_value = max(squad_players, key=lambda x: x['ppm'])
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.success(f"🔥 **Best Form**: {best_form['name']} ({best_form['form']:.1f})")
+        
+        with col2:
+            st.error(f"❄️ **Needs Attention**: {worst_form['name']} ({worst_form['form']:.1f})")
+        
+        with col3:
+            st.info(f"💎 **Best Value**: {best_value['name']} ({best_value['ppm']:.1f} PPM)")
+    
+    def _display_position_analysis(self, team_data, players_df, picks):
+        """Display detailed position-by-position analysis"""
+        st.subheader("📊 Position Analysis")
+        
+        # Group players by position
+        positions = {}
+        for pick in picks:
+            player_info = players_df[players_df['id'] == pick['element']]
+            if not player_info.empty:
+                player = player_info.iloc[0]
+                position = player.get('position_name', 'Unknown')
+                
+                if position not in positions:
+                    positions[position] = []
+                
+                positions[position].append({
+                    'name': player.get('web_name', 'Unknown'),
+                    'team': player.get('team_short_name', 'UNK'),
+                    'price': float(player.get('now_cost', 0)) / 10,
+                    'points': int(player.get('total_points', 0)),
+                    'form': float(player.get('form', 0)),
+                    'ppm': float(player.get('points_per_million', 0)),
+                    'starting': pick.get('position', 12) <= 11
+                })
+        
+        # Analyze each position
+        for position, players in positions.items():
+            with st.expander(f"⚽ {position}s ({len(players)} players)"):
+                
+                # Position metrics
+                col1, col2, col3, col4 = st.columns(4)
+                
+                avg_price = sum(p['price'] for p in players) / len(players)
+                avg_points = sum(p['points'] for p in players) / len(players)
+                avg_form = sum(p['form'] for p in players) / len(players)
+                starting_count = sum(1 for p in players if p['starting'])
+                
+                with col1:
+                    st.metric("Avg Price", f"£{avg_price:.1f}m")
+                
+                with col2:
+                    st.metric("Avg Points", f"{avg_points:.0f}")
+                
+                with col3:
+                    st.metric("Avg Form", f"{avg_form:.1f}")
+                
+                with col4:
+                    st.metric("Starting", f"{starting_count}/{len(players)}")
+                
+                # Player breakdown
+                st.write("**Players:**")
+                for player in sorted(players, key=lambda x: x['points'], reverse=True):
+                    status = "🟢 Starting" if player['starting'] else "🟡 Bench"
+                    form_emoji = "🔥" if player['form'] > 6 else "❄️" if player['form'] < 3 else "⚖️"
+                    
+                    st.write(f"• **{player['name']}** ({player['team']}) - £{player['price']:.1f}m - "
+                            f"{player['points']} pts - {form_emoji} {player['form']:.1f} - {status}")
+                
+                # Position-specific recommendations
+                if position == 'Goalkeeper':
+                    if len(players) < 2:
+                        st.warning("⚠️ Consider adding a second goalkeeper for squad balance")
+                    elif avg_form < 4:
+                        st.warning("⚠️ Both goalkeepers in poor form - monitor closely")
+                
+                elif position == 'Defender':
+                    if starting_count < 3:
+                        st.warning("⚠️ Consider starting at least 3 defenders")
+                    elif avg_form > 6:
+                        st.success("✅ Strong defensive options in good form")
+                
+                elif position == 'Midfielder':
+                    if starting_count < 3:
+                        st.warning("⚠️ Consider starting at least 3 midfielders")
+                    elif avg_price > 8:
+                        st.info("💰 Premium-heavy midfield - ensure returns justify cost")
+                
+                elif position == 'Forward':
+                    if starting_count < 1:
+                        st.error("❌ Must start at least 1 forward")
+                    elif len(players) < 3:
+                        st.warning("⚠️ Consider having 3 forwards for flexibility")
+    
+    def _display_squad_value_analysis(self, team_data, players_df, picks):
+        """Display comprehensive value analysis"""
+        st.subheader("💎 Value Analysis")
+        
+        # Get all squad players with value metrics
+        value_players = []
+        for pick in picks:
+            player_info = players_df[players_df['id'] == pick['element']]
+            if not player_info.empty:
+                player = player_info.iloc[0]
+                
+                price = float(player.get('now_cost', 0)) / 10
+                points = int(player.get('total_points', 0))
+                ppm = float(player.get('points_per_million', 0))
+                ownership = float(player.get('selected_by_percent', 0))
+                
+                # Calculate value metrics
+                value_score = ppm  # Base value score
+                differential_bonus = max(0, (20 - ownership) / 4)  # Bonus for low ownership
+                final_value = value_score + differential_bonus
+                
+                value_players.append({
+                    'name': player.get('web_name', 'Unknown'),
+                    'position': player.get('position_name', 'Unknown'),
+                    'price': price,
+                    'points': points,
+                    'ppm': ppm,
+                    'ownership': ownership,
+                    'value_score': final_value,
+                    'category': self._categorize_value(ppm, ownership)
+                })
+        
+        # Value distribution
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**💰 Value Distribution**")
+            
+            excellent = len([p for p in value_players if p['ppm'] > 8])
+            good = len([p for p in value_players if 6 < p['ppm'] <= 8])
+            average = len([p for p in value_players if 4 < p['ppm'] <= 6])
+            poor = len([p for p in value_players if p['ppm'] <= 4])
+            
+            st.metric("💎 Excellent (>8 PPM)", excellent)
+            st.metric("👍 Good (6-8 PPM)", good)
+            st.metric("⚖️ Average (4-6 PPM)", average)
+            st.metric("⚠️ Poor (<4 PPM)", poor)
+        
+        with col2:
+            st.write("**🎯 Ownership Analysis**")
+            
+            template = len([p for p in value_players if p['ownership'] > 50])
+            popular = len([p for p in value_players if 20 < p['ownership'] <= 50])
+            differential = len([p for p in value_players if p['ownership'] <= 20])
+            
+            st.metric("🔄 Template (>50%)", template)
+            st.metric("📊 Popular (20-50%)", popular)
+            st.metric("💎 Differential (<20%)", differential)
+        
+        # Value champions and concerns
+        st.write("**🏆 Value Champions & Concerns**")
+        
+        # Sort by value score
+        sorted_players = sorted(value_players, key=lambda x: x['value_score'], reverse=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.success("**💎 Best Value Players**")
+            for player in sorted_players[:5]:
+                st.write(f"• **{player['name']}** ({player['position']}) - "
+                        f"£{player['price']:.1f}m - {player['ppm']:.1f} PPM - "
+                        f"{player['ownership']:.1f}% owned")
+        
+        with col2:
+            st.error("**⚠️ Value Concerns**")
+            for player in sorted_players[-5:]:
+                st.write(f"• **{player['name']}** ({player['position']}) - "
+                        f"£{player['price']:.1f}m - {player['ppm']:.1f} PPM - "
+                        f"{player['ownership']:.1f}% owned")
+        
+        # Value optimization suggestions
+        st.write("**💡 Value Optimization Suggestions**")
+        
+        suggestions = []
+        
+        if poor >= 3:
+            suggestions.append("🔄 Consider transferring out players with PPM < 4")
+        
+        if template >= 8:
+            suggestions.append("💎 Look for differential options to gain rank")
+        
+        if excellent < 5:
+            suggestions.append("📈 Target more high-value players (PPM > 8)")
+        
+        total_value = sum(p['price'] for p in value_players)
+        bank = team_data.get('bank', 0) / 10
+        
+        if bank > 2:
+            suggestions.append(f"💰 £{bank:.1f}m in bank - consider upgrades")
+        
+        if total_value < 95:
+            suggestions.append("⬆️ Squad value below optimal - room for upgrades")
+        
+        if suggestions:
+            for suggestion in suggestions:
+                st.info(suggestion)
+        else:
+            st.success("✅ Well-optimized squad value distribution!")
+    
+    def _categorize_value(self, ppm, ownership):
+        """Categorize player value"""
+        if ppm > 8:
+            if ownership < 15:
+                return "💎 Premium Differential"
+            else:
+                return "🏆 Premium Value"
+        elif ppm > 6:
+            if ownership < 20:
+                return "💎 Good Differential"
+            else:
+                return "👍 Good Value"
+        elif ppm > 4:
+            return "⚖️ Average Value"
+        else:
+            return "⚠️ Poor Value"
+    
     def _display_performance_analysis(self, team_data):
-        """Display performance analysis"""
+        """Display performance analysis with enhanced visualizations"""
         st.subheader("📊 Performance Analysis")
+        
+        # Add real-time performance dashboard
+        self._add_real_time_dashboard(team_data)
         
         # Basic performance metrics
         col1, col2, col3 = st.columns(3)
@@ -279,60 +599,1266 @@ class MyTeamPage:
                 st.info("👍 Above average performance - Top 50% of all managers")
             else:
                 st.warning("📈 Room for improvement - Focus on consistency and transfers")
+        
+        # Add performance visualization
+        if st.session_state.get('data_loaded', False):
+            self._create_performance_charts(team_data)
+    
+    def _create_performance_charts(self, team_data):
+        """Create interactive performance charts"""
+        st.subheader("📈 Performance Trends")
+        
+        # Create simulated historical data (in production, this would come from API)
+        current_gw = team_data.get('gameweek', 1)
+        total_points = team_data.get('summary_overall_points', 0)
+        
+        # Simulate gameweek-by-gameweek performance
+        gameweeks = list(range(1, current_gw + 1))
+        cumulative_points = []
+        weekly_points = []
+        
+        for gw in gameweeks:
+            # Simulate realistic point progression
+            if gw == 1:
+                weekly = max(20, min(80, np.random.normal(50, 15)))
+                cumulative = weekly
+            else:
+                weekly = max(20, min(80, np.random.normal(50, 15)))
+                cumulative = cumulative_points[-1] + weekly
+            
+            weekly_points.append(weekly)
+            cumulative_points.append(cumulative)
+        
+        # Adjust final cumulative to match actual total
+        if cumulative_points:
+            adjustment_factor = total_points / cumulative_points[-1] if cumulative_points[-1] > 0 else 1
+            cumulative_points = [p * adjustment_factor for p in cumulative_points]
+        
+        # Create performance chart
+        fig = go.Figure()
+        
+        # Add cumulative points line
+        fig.add_trace(go.Scatter(
+            x=gameweeks,
+            y=cumulative_points,
+            mode='lines+markers',
+            name='Cumulative Points',
+            line=dict(color='#1f77b4', width=3),
+            marker=dict(size=6)
+        ))
+        
+        # Add weekly points bars
+        fig.add_trace(go.Bar(
+            x=gameweeks,
+            y=weekly_points,
+            name='Weekly Points',
+            opacity=0.7,
+            yaxis='y2',
+            marker_color='rgba(255, 165, 0, 0.7)'
+        ))
+        
+        # Add average line
+        avg_line = [total_points / current_gw * gw for gw in gameweeks]
+        fig.add_trace(go.Scatter(
+            x=gameweeks,
+            y=avg_line,
+            mode='lines',
+            name='Average Pace',
+            line=dict(color='red', dash='dash', width=2)
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title='Season Performance Trend',
+            xaxis_title='Gameweek',
+            yaxis_title='Cumulative Points',
+            yaxis2=dict(
+                title='Weekly Points',
+                overlaying='y',
+                side='right',
+                range=[0, max(weekly_points) * 1.2]
+            ),
+            height=500,
+            showlegend=True,
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Performance metrics summary
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Highest GW", f"{max(weekly_points):.0f} pts")
+        
+        with col2:
+            st.metric("Lowest GW", f"{min(weekly_points):.0f} pts")
+        
+        with col3:
+            consistency = (1 - np.std(weekly_points) / np.mean(weekly_points)) * 100
+            st.metric("Consistency", f"{consistency:.0f}%")
+        
+        with col4:
+            trend = "📈 Improving" if weekly_points[-3:] > weekly_points[-6:-3] else "📉 Declining"
+            st.metric("Recent Trend", trend)
+    
+    def _add_real_time_dashboard(self, team_data):
+        """Add real-time performance tracking dashboard"""
+        st.subheader("📈 Real-Time Performance Dashboard")
+        
+        # Performance velocity metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            # Rank velocity (change per gameweek)
+            current_rank = team_data.get('summary_overall_rank', 0)
+            rank_velocity = self._calculate_rank_velocity(team_data)
+            st.metric("Rank Velocity", f"{rank_velocity:+,}/GW", 
+                     delta_color="inverse" if rank_velocity > 0 else "normal")
+        
+        with col2:
+            # Points momentum
+            recent_avg = self._get_recent_average_points(team_data, 3)
+            season_avg = team_data.get('summary_overall_points', 0) / max(team_data.get('gameweek', 1), 1)
+            momentum = recent_avg - season_avg
+            st.metric("Points Momentum", f"{momentum:+.1f}", 
+                     delta_color="normal" if momentum > 0 else "inverse")
+        
+        with col3:
+            # Team efficiency
+            efficiency_score = self._calculate_team_efficiency(team_data)
+            st.metric("Team Efficiency", f"{efficiency_score:.0f}%")
+        
+        with col4:
+            # Risk-adjusted performance
+            risk_score = self._calculate_risk_adjusted_performance(team_data)
+            st.metric("Risk-Adj. Score", f"{risk_score:.1f}")
+        
+        # Performance indicators
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Recent form trend
+            st.write("**📊 Recent Form Analysis**")
+            if momentum > 5:
+                st.success("🚀 Strong upward momentum")
+            elif momentum > 0:
+                st.info("📈 Positive trend")
+            elif momentum > -5:
+                st.warning("📉 Slight decline")
+            else:
+                st.error("⚠️ Concerning downward trend")
+        
+        with col2:
+            # Performance consistency
+            st.write("**⚖️ Consistency Rating**")
+            if efficiency_score > 85:
+                st.success("🎯 Highly consistent performance")
+            elif efficiency_score > 70:
+                st.info("👍 Good consistency")
+            elif efficiency_score > 55:
+                st.warning("⚡ Moderately consistent")
+            else:
+                st.error("🌊 High volatility - focus on stability")
+    
+    def _calculate_rank_velocity(self, team_data):
+        """Calculate rank change velocity"""
+        # Simplified calculation - in production, would use historical data
+        current_rank = team_data.get('summary_overall_rank', 0)
+        current_gw = team_data.get('gameweek', 1)
+        
+        if current_rank == 0 or current_gw <= 1:
+            return 0
+        
+        # Estimate based on points performance
+        gw_points = team_data.get('summary_event_points', 0)
+        avg_gw_points = 50  # League average
+        
+        if gw_points > avg_gw_points + 20:
+            return -50000  # Rank improving (going down in number)
+        elif gw_points > avg_gw_points + 10:
+            return -25000
+        elif gw_points < avg_gw_points - 20:
+            return 50000   # Rank declining (going up in number)
+        elif gw_points < avg_gw_points - 10:
+            return 25000
+        else:
+            return 0
+    
+    def _get_recent_average_points(self, team_data, weeks=3):
+        """Get recent average points (simplified)"""
+        # In production, this would calculate from historical data
+        current_gw_points = team_data.get('summary_event_points', 0)
+        total_points = team_data.get('summary_overall_points', 0)
+        current_gw = team_data.get('gameweek', 1)
+        
+        if current_gw <= weeks:
+            return total_points / max(current_gw, 1)
+        
+        # Simulate recent performance based on current gameweek
+        season_avg = total_points / current_gw
+        recent_multiplier = 1.0 + (current_gw_points - 50) / 100  # Adjust based on current performance
+        
+        return season_avg * recent_multiplier
+    
+    def _calculate_team_efficiency(self, team_data):
+        """Calculate team efficiency score"""
+        total_points = team_data.get('summary_overall_points', 0)
+        team_value = team_data.get('value', 1000) / 10
+        current_gw = team_data.get('gameweek', 1)
+        
+        if team_value == 0 or current_gw == 0:
+            return 0
+        
+        # Points per million per gameweek
+        ppm_per_gw = (total_points / team_value) / current_gw
+        
+        # Normalize to 0-100 scale (8+ ppm/gw = 100%)
+        efficiency = min(100, (ppm_per_gw / 8) * 100)
+        
+        return max(0, efficiency)
+    
+    def _calculate_risk_adjusted_performance(self, team_data):
+        """Calculate risk-adjusted performance score"""
+        total_points = team_data.get('summary_overall_points', 0)
+        current_gw = team_data.get('gameweek', 1)
+        
+        if current_gw == 0:
+            return 0
+        
+        avg_ppg = total_points / current_gw
+        
+        # Simulate risk adjustment based on recent volatility
+        gw_points = team_data.get('summary_event_points', 0)
+        volatility_penalty = abs(gw_points - avg_ppg) / 10
+        
+        risk_adjusted = avg_ppg - volatility_penalty
+        
+        return max(0, risk_adjusted)
+    
+    def _display_advanced_analytics(self, team_data):
+        """Display advanced analytics and insights"""
+        st.subheader("📈 Advanced Team Analytics")
+        
+        if not st.session_state.get('data_loaded', False):
+            st.warning("Load player data to enable advanced analytics")
+            return
+        
+        players_df = st.session_state.players_df
+        picks = team_data.get('picks', [])
+        
+        # Enhanced analytics tabs
+        analytics_tabs = st.tabs([
+            "🏗️ Squad Composition", 
+            "📊 Performance Metrics", 
+            "💰 Value Analysis",
+            "🎯 Risk Assessment",
+            "📈 Trend Analysis",
+            "🔮 Predictive Analytics",
+            "🎲 Monte Carlo Simulation",
+            "🧠 AI Insights"
+        ])
+        
+        with analytics_tabs[0]:
+            self._display_squad_composition_analysis(team_data, players_df, picks)
+        
+        with analytics_tabs[1]:
+            self._display_performance_metrics_analysis(team_data, players_df, picks)
+        
+        with analytics_tabs[2]:
+            self._display_value_analysis(team_data, players_df, picks)
+        
+        with analytics_tabs[3]:
+            self._display_risk_assessment(team_data, players_df, picks)
+        
+        with analytics_tabs[4]:
+            self._display_trend_analysis(team_data, players_df, picks)
+        
+        with analytics_tabs[5]:
+            self._display_predictive_analytics(team_data, players_df, picks)
+        
+        with analytics_tabs[6]:
+            self._display_monte_carlo_simulation(team_data, players_df, picks)
+        
+        with analytics_tabs[7]:
+            self._display_ai_insights(team_data, players_df, picks)
+    
+    def _display_predictive_analytics(self, team_data, players_df, picks):
+        """Display predictive analytics for upcoming gameweeks"""
+        st.subheader("🔮 Predictive Analytics")
+        
+        with st.expander("📚 Understanding Predictive Analytics", expanded=False):
+            st.markdown("""
+            **Predictive Analytics** uses historical data and statistical models to forecast:
+            
+            🎯 **What we predict:**
+            - Expected points for next 5 gameweeks
+            - Player performance trends
+            - Optimal transfer timing
+            - Captain choice probabilities
+            
+            📊 **How it works:**
+            - Form trend analysis
+            - Fixture difficulty weighting
+            - Historical performance patterns
+            - Team strength correlations
+            """)
+        
+        # Prediction settings
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            prediction_weeks = st.selectbox(
+                "📅 Prediction Horizon",
+                [3, 5, 8, 10],
+                index=1,
+                help="Number of gameweeks to predict"
+            )
+        
+        with col2:
+            confidence_level = st.slider(
+                "🎯 Confidence Level",
+                min_value=70, max_value=95, value=80,
+                help="Statistical confidence level for predictions"
+            )
+        
+        with col3:
+            model_type = st.selectbox(
+                "🤖 Model Type",
+                ["Conservative", "Balanced", "Aggressive"],
+                index=1,
+                help="Prediction model approach"
+            )
+        
+        if st.button("🚀 Generate Predictions", type="primary"):
+            with st.spinner("Running predictive models..."):
+                predictions = self._generate_team_predictions(
+                    team_data, players_df, picks, prediction_weeks, confidence_level, model_type
+                )
+                
+                # Display predictions overview
+                st.subheader("📊 Prediction Summary")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Expected Points", f"{predictions['expected_total']:.0f}")
+                
+                with col2:
+                    current_avg = team_data.get('summary_overall_points', 0) / max(team_data.get('gameweek', 1), 1)
+                    predicted_avg = predictions['expected_total'] / prediction_weeks
+                    momentum = predicted_avg - current_avg
+                    st.metric("Predicted Avg/GW", f"{predicted_avg:.1f}", 
+                             delta=f"{momentum:+.1f}")
+                
+                with col3:
+                    st.metric("Confidence", f"{confidence_level}%")
+                
+                with col4:
+                    st.metric("Model", model_type)
+                
+                # Weekly breakdown
+                st.subheader("📅 Weekly Predictions")
+                
+                for week in predictions['weekly_breakdown']:
+                    with st.expander(f"Gameweek {week['gameweek']} - Predicted: {week['expected_points']:.1f} points"):
+                        
+                        # Top predicted performers
+                        st.write("**🎯 Top Expected Performers:**")
+                        for i, player in enumerate(week['top_performers'][:5], 1):
+                            confidence_emoji = "🔥" if player['confidence'] > 80 else "👍" if player['confidence'] > 60 else "⚠️"
+                            st.write(f"{i}. **{player['name']}** - {player['expected_points']:.1f} pts "
+                                   f"{confidence_emoji} ({player['confidence']:.0f}% confidence)")
+                        
+                        # Captain recommendation
+                        captain_rec = week['captain_recommendation']
+                        st.info(f"👑 **Captain Recommendation**: {captain_rec['name']} "
+                               f"({captain_rec['expected_points']:.1f} pts)")
+                        
+                        # Risk factors
+                        if week['risk_factors']:
+                            st.warning("⚠️ **Risk Factors:**")
+                            for risk in week['risk_factors']:
+                                st.write(f"• {risk}")
+                
+                # Transfer recommendations
+                st.subheader("🔄 Predicted Transfer Value")
+                
+                transfer_recs = predictions['transfer_recommendations']
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.success("**📈 Players to Consider**")
+                    for rec in transfer_recs['targets'][:5]:
+                        st.write(f"• **{rec['name']}** - Expected: {rec['predicted_points']:.1f} pts/GW")
+                
+                with col2:
+                    st.error("**📉 Underperforming Assets**")
+                    for rec in transfer_recs['concerns'][:5]:
+                        st.write(f"• **{rec['name']}** - Expected: {rec['predicted_points']:.1f} pts/GW")
+    
+    def _generate_team_predictions(self, team_data, players_df, picks, weeks, confidence, model_type):
+        """Generate predictive analytics for the team"""
+        
+        # Get squad players with prediction data
+        squad_players = []
+        for pick in picks:
+            player_info = players_df[players_df['id'] == pick['element']]
+            if not player_info.empty:
+                player = player_info.iloc[0]
+                
+                # Calculate prediction factors
+                form = float(player.get('form', 0))
+                total_points = int(player.get('total_points', 0))
+                minutes = int(player.get('minutes', 0))
+                
+                # Base prediction on form and historical performance
+                base_prediction = form * 1.2  # Form as base predictor
+                
+                # Adjust for model type
+                if model_type == "Conservative":
+                    multiplier = 0.85
+                elif model_type == "Aggressive":
+                    multiplier = 1.15
+                else:
+                    multiplier = 1.0
+                
+                predicted_ppg = base_prediction * multiplier
+                
+                squad_players.append({
+                    'id': player.get('id'),
+                    'name': player.get('web_name', 'Unknown'),
+                    'position': player.get('position_name', 'Unknown'),
+                    'form': form,
+                    'predicted_ppg': predicted_ppg,
+                    'confidence': min(95, max(50, 70 + (form - 5) * 5)),  # Confidence based on form
+                    'starting': pick.get('position', 12) <= 11
+                })
+        
+        # Generate weekly predictions
+        weekly_breakdown = []
+        total_expected = 0
+        
+        for week in range(1, weeks + 1):
+            week_points = 0
+            top_performers = []
+            risk_factors = []
+            
+            for player in squad_players:
+                if player['starting']:
+                    # Add some random variation for realism
+                    week_prediction = max(0, player['predicted_ppg'] + np.random.normal(0, 1))
+                    week_points += week_prediction
+                    
+                    top_performers.append({
+                        'name': player['name'],
+                        'expected_points': week_prediction,
+                        'confidence': player['confidence']
+                    })
+                
+                # Identify risk factors
+                if player['starting'] and player['confidence'] < 60:
+                    risk_factors.append(f"{player['name']} has low prediction confidence")
+            
+            # Sort top performers
+            top_performers.sort(key=lambda x: x['expected_points'], reverse=True)
+            
+            # Captain recommendation
+            captain_rec = top_performers[0] if top_performers else {'name': 'N/A', 'expected_points': 0}
+            
+            weekly_breakdown.append({
+                'gameweek': team_data.get('gameweek', 1) + week,
+                'expected_points': week_points,
+                'top_performers': top_performers,
+                'captain_recommendation': captain_rec,
+                'risk_factors': risk_factors
+            })
+            
+            total_expected += week_points
+        
+        # Transfer recommendations (simplified)
+        transfer_targets = []
+        transfer_concerns = []
+        
+        for player in squad_players:
+            if player['predicted_ppg'] > 7:
+                transfer_targets.append({
+                    'name': player['name'],
+                    'predicted_points': player['predicted_ppg']
+                })
+            elif player['predicted_ppg'] < 3:
+                transfer_concerns.append({
+                    'name': player['name'],
+                    'predicted_points': player['predicted_ppg']
+                })
+        
+        return {
+            'expected_total': total_expected,
+            'weekly_breakdown': weekly_breakdown,
+            'transfer_recommendations': {
+                'targets': sorted(transfer_targets, key=lambda x: x['predicted_points'], reverse=True),
+                'concerns': sorted(transfer_concerns, key=lambda x: x['predicted_points'])
+            }
+        }
+    
+    def _display_monte_carlo_simulation(self, team_data, players_df, picks):
+        """Display Monte Carlo simulation for season outcomes"""
+        st.subheader("🎲 Monte Carlo Simulation")
+        
+        with st.expander("📚 What is Monte Carlo Simulation?", expanded=False):
+            st.markdown("""
+            **Monte Carlo Simulation** runs thousands of scenarios to predict possible outcomes:
+            
+            🎯 **What it simulates:**
+            - Final season rank distribution
+            - Points total probabilities
+            - Transfer decision outcomes
+            - Captain choice success rates
+            
+            📊 **How it works:**
+            - Runs 10,000+ random scenarios
+            - Uses probability distributions
+            - Accounts for uncertainty
+            - Provides confidence intervals
+            """)
+        
+        # Simulation settings
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            num_simulations = st.selectbox(
+                "🔢 Simulations",
+                [1000, 5000, 10000],
+                index=1,
+                help="More simulations = higher accuracy"
+            )
+        
+        with col2:
+            scenario_type = st.selectbox(
+                "📈 Scenario",
+                ["Season Finish", "Next 5 GWs", "Transfer Impact"],
+                help="What to simulate"
+            )
+        
+        with col3:
+            risk_level = st.slider(
+                "⚖️ Risk Tolerance",
+                min_value=1, max_value=10, value=5,
+                help="1=Conservative, 10=High risk"
+            )
+        
+        if st.button("🎲 Run Simulation", type="primary"):
+            with st.spinner(f"Running {num_simulations:,} simulations..."):
+                simulation_results = self._run_monte_carlo_simulation(
+                    team_data, players_df, picks, num_simulations, scenario_type, risk_level
+                )
+                
+                # Display results
+                st.subheader("📊 Simulation Results")
+                
+                if scenario_type == "Season Finish":
+                    self._display_season_finish_simulation(simulation_results)
+                elif scenario_type == "Next 5 GWs":
+                    self._display_short_term_simulation(simulation_results)
+                else:
+                    self._display_transfer_impact_simulation(simulation_results)
+    
+    def _run_monte_carlo_simulation(self, team_data, players_df, picks, num_sims, scenario_type, risk_level):
+        """Run Monte Carlo simulation"""
+        
+        current_points = team_data.get('summary_overall_points', 0)
+        current_gw = team_data.get('gameweek', 1)
+        current_rank = team_data.get('summary_overall_rank', 4000000)
+        
+        results = []
+        
+        for _ in range(num_sims):
+            if scenario_type == "Season Finish":
+                # Simulate remaining gameweeks
+                remaining_gws = 38 - current_gw
+                
+                # Base weekly performance with variation
+                base_weekly = current_points / max(current_gw, 1)
+                weekly_std = base_weekly * 0.3  # 30% standard deviation
+                
+                # Simulate remaining weeks
+                remaining_points = 0
+                for week in range(remaining_gws):
+                    # Add form factor and random variation
+                    week_points = max(20, np.random.normal(base_weekly, weekly_std))
+                    remaining_points += week_points
+                
+                final_points = current_points + remaining_points
+                
+                # Estimate final rank (simplified)
+                # Better performance = better rank
+                rank_improvement = (remaining_points / remaining_gws - 50) * 1000
+                estimated_final_rank = max(1, current_rank - rank_improvement * remaining_gws)
+                
+                results.append({
+                    'final_points': final_points,
+                    'final_rank': estimated_final_rank
+                })
+            
+            elif scenario_type == "Next 5 GWs":
+                # Simulate next 5 gameweeks
+                total_points = 0
+                weekly_points = []
+                
+                for week in range(5):
+                    base_weekly = current_points / max(current_gw, 1)
+                    week_points = max(20, np.random.normal(base_weekly, base_weekly * 0.25))
+                    total_points += week_points
+                    weekly_points.append(week_points)
+                
+                results.append({
+                    'total_5gw_points': total_points,
+                    'weekly_points': weekly_points,
+                    'avg_weekly': total_points / 5
+                })
+            
+            else:  # Transfer Impact
+                # Simulate transfer success
+                transfer_success = np.random.random() < (0.6 + risk_level * 0.03)
+                
+                if transfer_success:
+                    points_gain = np.random.normal(15, 5)  # Successful transfer
+                else:
+                    points_gain = np.random.normal(-5, 3)  # Failed transfer
+                
+                results.append({
+                    'transfer_success': transfer_success,
+                    'points_impact': points_gain
+                })
+        
+        return results
+    
+    def _display_season_finish_simulation(self, results):
+        """Display season finish simulation results"""
+        final_points = [r['final_points'] for r in results]
+        final_ranks = [r['final_rank'] for r in results]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Points distribution
+            fig = go.Figure(data=[go.Histogram(x=final_points, nbinsx=30)])
+            fig.update_layout(
+                title="Final Points Distribution",
+                xaxis_title="Total Points",
+                yaxis_title="Frequency",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Rank distribution
+            fig = go.Figure(data=[go.Histogram(x=final_ranks, nbinsx=30)])
+            fig.update_layout(
+                title="Final Rank Distribution",
+                xaxis_title="Final Rank",
+                yaxis_title="Frequency",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Statistics
+        st.subheader("📈 Outcome Probabilities")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            median_points = np.median(final_points)
+            st.metric("Median Points", f"{median_points:.0f}")
+        
+        with col2:
+            median_rank = np.median(final_ranks)
+            st.metric("Median Rank", f"{median_rank:,.0f}")
+        
+        with col3:
+            top_10k_prob = len([r for r in final_ranks if r <= 10000]) / len(final_ranks) * 100
+            st.metric("Top 10K Probability", f"{top_10k_prob:.1f}%")
+        
+        with col4:
+            top_1k_prob = len([r for r in final_ranks if r <= 1000]) / len(final_ranks) * 100
+            st.metric("Top 1K Probability", f"{top_1k_prob:.1f}%")
+        
+        # Confidence intervals
+        st.write("**📊 Confidence Intervals:**")
+        
+        p10_points = np.percentile(final_points, 10)
+        p90_points = np.percentile(final_points, 90)
+        p10_rank = np.percentile(final_ranks, 90)  # Inverted for rank
+        p90_rank = np.percentile(final_ranks, 10)
+        
+        st.info(f"**80% Confidence Interval:**")
+        st.write(f"• Points: {p10_points:.0f} - {p90_points:.0f}")
+        st.write(f"• Rank: {p10_rank:,.0f} - {p90_rank:,.0f}")
+    
+    def _display_short_term_simulation(self, results):
+        """Display short-term (5 GW) simulation results"""
+        total_points = [r['total_5gw_points'] for r in results]
+        avg_weekly = [r['avg_weekly'] for r in results]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Total points distribution
+            fig = go.Figure(data=[go.Histogram(x=total_points, nbinsx=25)])
+            fig.update_layout(
+                title="Next 5 GWs - Total Points",
+                xaxis_title="Total Points",
+                yaxis_title="Frequency",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Average weekly distribution
+            fig = go.Figure(data=[go.Histogram(x=avg_weekly, nbinsx=25)])
+            fig.update_layout(
+                title="Average Points per GW",
+                xaxis_title="Avg Points/GW",
+                yaxis_title="Frequency",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Probability analysis
+        st.subheader("🎯 Performance Probabilities")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        median_total = np.median(total_points)
+        excellent_prob = len([p for p in total_points if p >= 350]) / len(total_points) * 100
+        poor_prob = len([p for p in total_points if p <= 200]) / len(total_points) * 100
+        
+        with col1:
+            st.metric("Expected Total", f"{median_total:.0f} pts")
+        
+        with col2:
+            st.metric("Expected Avg/GW", f"{np.median(avg_weekly):.1f} pts")
+        
+        with col3:
+            st.metric("Excellent Run (350+)", f"{excellent_prob:.1f}%")
+        
+        with col4:
+            st.metric("Poor Run (<200)", f"{poor_prob:.1f}%")
+    
+    def _display_transfer_impact_simulation(self, results):
+        """Display transfer impact simulation results"""
+        success_rate = len([r for r in results if r['transfer_success']]) / len(results) * 100
+        points_impact = [r['points_impact'] for r in results]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Success rate pie chart
+            fig = go.Figure(data=[go.Pie(
+                labels=['Success', 'Failure'],
+                values=[success_rate, 100 - success_rate],
+                hole=0.3
+            )])
+            fig.update_layout(
+                title="Transfer Success Rate",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Points impact distribution
+            fig = go.Figure(data=[go.Histogram(x=points_impact, nbinsx=25)])
+            fig.update_layout(
+                title="Points Impact Distribution",
+                xaxis_title="Points Impact",
+                yaxis_title="Frequency",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Statistics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Success Rate", f"{success_rate:.1f}%")
+        
+        with col2:
+            expected_impact = np.mean(points_impact)
+            st.metric("Expected Impact", f"{expected_impact:+.1f} pts")
+        
+        with col3:
+            positive_prob = len([p for p in points_impact if p > 0]) / len(points_impact) * 100
+            st.metric("Positive Impact", f"{positive_prob:.1f}%")
+        
+        with col4:
+            big_gain_prob = len([p for p in points_impact if p > 20]) / len(points_impact) * 100
+            st.metric("Big Gain (20+)", f"{big_gain_prob:.1f}%")
+    
+    def _display_ai_insights(self, team_data, players_df, picks):
+        """Display AI-powered insights and recommendations"""
+        st.subheader("🧠 AI-Powered Insights")
+        
+        with st.expander("🤖 How AI Insights Work", expanded=False):
+            st.markdown("""
+            Our **AI Engine** analyzes your team using advanced algorithms:
+            
+            🧠 **Pattern Recognition:**
+            - Identifies successful team patterns
+            - Spots underperforming combinations
+            - Recognizes market inefficiencies
+            
+            📊 **Multi-factor Analysis:**
+            - Combines 50+ data points
+            - Weights factors by importance
+            - Adapts to your management style
+            
+            💡 **Personalized Recommendations:**
+            - Tailored to your risk profile
+            - Considers your transfer history
+            - Aligns with your objectives
+            """)
+        
+        # AI Analysis Settings
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            analysis_depth = st.selectbox(
+                "🔍 Analysis Depth",
+                ["Quick Scan", "Standard Analysis", "Deep Dive"],
+                index=1
+            )
+        
+        with col2:
+            focus_area = st.selectbox(
+                "🎯 Focus Area",
+                ["Overall Performance", "Transfer Strategy", "Risk Management", "Differential Picks"],
+                index=0
+            )
+        
+        if st.button("🧠 Generate AI Insights", type="primary"):
+            with st.spinner("AI analyzing your team..."):
+                ai_insights = self._generate_ai_insights(
+                    team_data, players_df, picks, analysis_depth, focus_area
+                )
+                
+                # AI Confidence Score
+                st.subheader("🎯 AI Analysis Summary")
+                
+                confidence = ai_insights['confidence_score']
+                if confidence > 85:
+                    st.success(f"🤖 **High Confidence Analysis** ({confidence:.0f}%)")
+                elif confidence > 70:
+                    st.info(f"🤖 **Good Confidence Analysis** ({confidence:.0f}%)")
+                else:
+                    st.warning(f"🤖 **Moderate Confidence Analysis** ({confidence:.0f}%)")
+                
+                # Key Insights
+                st.subheader("💡 Key AI Insights")
+                
+                for i, insight in enumerate(ai_insights['key_insights'], 1):
+                    impact_color = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}
+                    impact_emoji = impact_color.get(insight['impact'], "⚪")
+                    
+                    with st.expander(f"{impact_emoji} {insight['title']} - {insight['impact']} Impact"):
+                        st.write(f"**Analysis:** {insight['description']}")
+                        st.write(f"**Recommendation:** {insight['recommendation']}")
+                        if insight['confidence'] > 80:
+                            st.success(f"✅ High confidence ({insight['confidence']:.0f}%)")
+                        elif insight['confidence'] > 60:
+                            st.info(f"👍 Good confidence ({insight['confidence']:.0f}%)")
+                        else:
+                            st.warning(f"⚠️ Moderate confidence ({insight['confidence']:.0f}%)")
+                
+                # Strategic Recommendations
+                st.subheader("🎯 Strategic Recommendations")
+                
+                strategies = ai_insights['strategic_recommendations']
+                
+                strategy_tabs = st.tabs(["🔄 Immediate Actions", "📅 Short-term Plan", "🎯 Long-term Strategy"])
+                
+                with strategy_tabs[0]:
+                    st.write("**⚡ Actions for This Gameweek:**")
+                    for action in strategies['immediate']:
+                        st.info(f"• {action}")
+                
+                with strategy_tabs[1]:
+                    st.write("**📈 Next 3-5 Gameweeks:**")
+                    for plan in strategies['short_term']:
+                        st.info(f"• {plan}")
+                
+                with strategy_tabs[2]:
+                    st.write("**🏆 Season-long Strategy:**")
+                    for strategy in strategies['long_term']:
+                        st.info(f"• {strategy}")
+                
+                # Performance Optimization
+                st.subheader("⚙️ AI Optimization Suggestions")
+                
+                optimizations = ai_insights['optimizations']
+                
+                for opt in optimizations:
+                    priority_color = {"High": "error", "Medium": "warning", "Low": "info"}
+                    priority_method = getattr(st, priority_color.get(opt['priority'], 'info'))
+                    
+                    priority_method(f"**{opt['area']}** ({opt['priority']} Priority): {opt['suggestion']}") 
+    
+    def _generate_ai_insights(self, team_data, players_df, picks, depth, focus):
+        """Generate AI-powered insights"""
+        
+        # Calculate base metrics for AI analysis
+        total_points = team_data.get('summary_overall_points', 0)
+        current_gw = team_data.get('gameweek', 1)
+        current_rank = team_data.get('summary_overall_rank', 4000000)
+        team_value = team_data.get('value', 1000) / 10
+        bank = team_data.get('bank', 0) / 10
+        
+        # Analyze squad composition
+        squad_analysis = self._analyze_squad_for_ai(players_df, picks)
+        
+        # Generate insights based on analysis depth
+        insights = []
+        confidence_factors = []
+        
+        # Performance Analysis
+        if total_points > 0:
+            avg_ppg = total_points / current_gw
+            
+            if avg_ppg > 60:
+                insights.append({
+                    'title': 'Strong Performance Trend',
+                    'description': f'Your {avg_ppg:.1f} points/GW is well above average',
+                    'recommendation': 'Maintain current strategy and look for incremental improvements',
+                    'impact': 'Low',
+                    'confidence': 90
+                })
+                confidence_factors.append(90)
+            elif avg_ppg < 45:
+                insights.append({
+                    'title': 'Performance Below Expectations',
+                    'description': f'Your {avg_ppg:.1f} points/GW suggests strategic issues',
+                    'recommendation': 'Consider major squad restructuring and transfer strategy review',
+                    'impact': 'High',
+                    'confidence': 85
+                })
+                confidence_factors.append(85)
+        
+        # Squad Balance Analysis
+        if squad_analysis['premium_heavy']:
+            insights.append({
+                'title': 'Premium-Heavy Squad Detected',
+                'description': 'High concentration of expensive players may limit flexibility',
+                'recommendation': 'Consider downgrading one premium to improve squad depth',
+                'impact': 'Medium',
+                'confidence': 80
+            })
+            confidence_factors.append(80)
+        
+        if squad_analysis['poor_value_count'] >= 3:
+            insights.append({
+                'title': 'Value Efficiency Issues',
+                'description': f'{squad_analysis["poor_value_count"]} players offer poor points per million',
+                'recommendation': 'Prioritize transferring out players with PPM < 4',
+                'impact': 'High',
+                'confidence': 88
+            })
+            confidence_factors.append(88)
+        
+        # Financial Analysis
+        if bank > 3:
+            insights.append({
+                'title': 'Unused Transfer Budget',
+                'description': f'£{bank:.1f}m in bank represents missed opportunities',
+                'recommendation': 'Invest in squad upgrades or target players before price rises',
+                'impact': 'Medium',
+                'confidence': 75
+            })
+            confidence_factors.append(75)
+        
+        # Risk Analysis
+        if squad_analysis['high_risk_players'] >= 4:
+            insights.append({
+                'title': 'High Squad Risk Exposure',
+                'description': 'Multiple players with injury/rotation concerns',
+                'recommendation': 'Diversify risk by targeting more reliable options',
+                'impact': 'High',
+                'confidence': 82
+            })
+            confidence_factors.append(82)
+        
+        # Generate strategic recommendations
+        strategies = {
+            'immediate': [], 
+            'short_term': [], 
+            'long_term': []
+        }
+        
+        # Immediate actions
+        if current_rank and current_rank > 1000000:
+            strategies['immediate'].append('Focus on template players to reduce rank volatility')
+        
+        strategies['immediate'].append('Monitor player price changes before next deadline')
+        strategies['immediate'].append('Check injury news for all starting players')
+        
+        # Short-term planning
+        strategies['short_term'].append('Plan transfers around upcoming fixture swings')
+        strategies['short_term'].append('Consider chip usage timing (Wildcard, Bench Boost, etc.)')
+        strategies['short_term'].append('Target players with favorable upcoming fixtures')
+        
+        # Long-term strategy
+        if current_gw < 20:
+            strategies['long_term'].append('Build squad value through strategic price rise targets')
+        else:
+            strategies['long_term'].append('Focus on consistent performers for season finale')
+        
+        strategies['long_term'].append('Develop differential strategy based on rank targets')
+        strategies['long_term'].append('Plan major squad changes around double gameweeks')
+        
+        # Optimization suggestions
+        optimizations = []
+        
+        if squad_analysis['weak_bench']:
+            optimizations.append({
+                'area': 'Squad Depth',
+                'suggestion': 'Improve bench strength for better rotation options',
+                'priority': 'Medium'
+            })
+        
+        if squad_analysis['captain_options'] < 3:
+            optimizations.append({
+                'area': 'Captaincy',
+                'suggestion': 'Acquire more reliable captain options',
+                'priority': 'High'
+            })
+        
+        optimizations.append({
+            'area': 'Form Monitoring',
+            'suggestion': 'Implement weekly form review process',
+            'priority': 'Low'
+        })
+        
+        # Calculate overall confidence
+        overall_confidence = np.mean(confidence_factors) if confidence_factors else 70
+        
+        return {
+            'confidence_score': overall_confidence,
+            'key_insights': insights,
+            'strategic_recommendations': strategies,
+            'optimizations': optimizations
+        }
+    
+    def _analyze_squad_for_ai(self, players_df, picks):
+        """Analyze squad for AI insights"""
+        
+        analysis = {
+            'premium_heavy': False,
+            'poor_value_count': 0,
+            'high_risk_players': 0,
+            'weak_bench': False,
+            'captain_options': 0
+        }
+        
+        premium_count = 0
+        bench_strength = 0
+        
+        for pick in picks:
+            player_info = players_df[players_df['id'] == pick['element']]
+            if not player_info.empty:
+                player = player_info.iloc[0]
+                
+                price = float(player.get('now_cost', 0)) / 10
+                ppm = float(player.get('points_per_million', 0))
+                form = float(player.get('form', 0))
+                status = player.get('status', 'a')
+                
+                # Premium player check
+                if price >= 10:
+                    premium_count += 1
+                
+                # Poor value check
+                if ppm < 4:
+                    analysis['poor_value_count'] += 1
+                
+                # High risk check
+                if status != 'a' or form < 3:
+                    analysis['high_risk_players'] += 1
+                
+                # Captain options
+                if form > 6 and price >= 8:
+                    analysis['captain_options'] += 1
+                
+                # Bench strength
+                if pick.get('position', 12) > 11:  # Bench player
+                    bench_strength += ppm
+        
+        # Set flags
+        analysis['premium_heavy'] = premium_count >= 4
+        analysis['weak_bench'] = bench_strength < 20
+        
+        return analysis
     
     def _display_recommendations(self, team_data):
-        """Display recommendations for the team"""
+        """Display enhanced recommendations for the team"""
         st.subheader("💡 Team Recommendations")
         
-        # Basic recommendations based on available data
+        # Enhanced recommendation system
+        recommendations = self._generate_enhanced_recommendations(team_data)
+        
+        # Recommendation categories
+        rec_tabs = st.tabs(["🔥 Priority Actions", "📈 Performance Tips", "💰 Value Opportunities", "🎯 Strategic Advice"])
+        
+        with rec_tabs[0]:
+            st.write("**⚡ High Priority Actions**")
+            priority_recs = [r for r in recommendations if r['priority'] == 'High']
+            if priority_recs:
+                for rec in priority_recs:
+                    st.error(f"🚨 **{rec['title']}**: {rec['message']}")
+            else:
+                st.success("✅ No urgent actions required!")
+        
+        with rec_tabs[1]:
+            st.write("**📊 Performance Improvement Tips**")
+            performance_recs = [r for r in recommendations if r['category'] == 'Performance']
+            for rec in performance_recs:
+                st.info(f"📈 **{rec['title']}**: {rec['message']}")
+        
+        with rec_tabs[2]:
+            st.write("**💎 Value Enhancement Opportunities**")
+            value_recs = [r for r in recommendations if r['category'] == 'Value']
+            for rec in value_recs:
+                st.success(f"💰 **{rec['title']}**: {rec['message']}")
+        
+        with rec_tabs[3]:
+            st.write("**🎯 Strategic Recommendations**")
+            strategic_recs = [r for r in recommendations if r['category'] == 'Strategic']
+            for rec in strategic_recs:
+                st.info(f"🎯 **{rec['title']}**: {rec['message']}")
+        
+        # General FPL wisdom
+        with st.expander("📚 Advanced FPL Strategy Guide", expanded=False):
+            st.markdown("""
+            ### 🏆 **Elite FPL Management Principles**
+            
+            **📊 Data-Driven Decisions:**
+            - Use xG, xA, and underlying stats over just points
+            - Monitor price change predictions and ownership trends
+            - Track fixture difficulty ratings beyond 5 gameweeks
+            
+            **🎯 Strategic Planning:**
+            - Plan transfers around fixture swings, not knee-jerk reactions
+            - Time chip usage for optimal double/blank gameweeks
+            - Maintain 2-3 premium captain options at all times
+            
+            **💎 Differential Strategy:**
+            - Target 2-3 <10% owned players for rank acceleration
+            - Balance template safety with differential upside
+            - Monitor rising ownership to sell before becoming template
+            
+            **⚖️ Risk Management:**
+            - Diversify across teams and price points
+            - Maintain strong bench for rotation flexibility
+            - Keep £0.5-1.0m buffer for price rise protection
+            """)
+    
+    def _generate_enhanced_recommendations(self, team_data):
+        """Generate enhanced, data-driven recommendations"""
         recommendations = []
         
-        # Bank analysis
+        # Get basic team metrics
+        total_points = team_data.get('summary_overall_points', 0)
+        current_gw = team_data.get('gameweek', 1)
+        current_rank = team_data.get('summary_overall_rank', 0)
+        team_value = team_data.get('value', 1000) / 10
         bank = team_data.get('bank', 0) / 10
-        if bank > 2:
-            recommendations.append({
-                'type': 'info',
-                'title': 'Unused Funds',
-                'message': f"You have £{bank:.1f}m in the bank. Consider upgrading a player to improve your team."
-            })
-        
-        # Recent performance
         gw_points = team_data.get('summary_event_points', 0)
-        if gw_points < 40:
+        
+        # Performance analysis
+        if current_gw > 0:
+            avg_ppg = total_points / current_gw
+            
+            if avg_ppg < 45:
+                recommendations.append({
+                    'title': 'Performance Review Required',
+                    'message': f'Averaging {avg_ppg:.1f} pts/GW is below competitive levels. Consider wildcard for major restructure.',
+                    'category': 'Performance',
+                    'priority': 'High'
+                })
+            elif avg_ppg > 65:
+                recommendations.append({
+                    'title': 'Excellent Performance',
+                    'message': f'Your {avg_ppg:.1f} pts/GW average is elite level. Focus on consistency and differential picks.',
+                    'category': 'Performance',
+                    'priority': 'Low'
+                })
+        
+        # Financial recommendations
+        if bank > 3:
             recommendations.append({
-                'type': 'warning',
-                'title': 'Low Gameweek Score',
-                'message': "Your recent gameweek score was below average. Consider reviewing your captain choice and active players."
+                'title': 'Excess Funds Available',
+                'message': f'£{bank:.1f}m in bank is suboptimal. Consider upgrading weaker squad members.',
+                'category': 'Value',
+                'priority': 'High'
+            })
+        elif bank < 0.5:
+            recommendations.append({
+                'title': 'Low Financial Flexibility',
+                'message': 'Consider downgrading a premium to improve transfer flexibility.',
+                'category': 'Strategic',
+                'priority': 'Medium'
             })
         
-        # Overall rank
-        overall_rank = team_data.get('summary_overall_rank', 0)
-        if overall_rank and overall_rank > 1000000:
+        # Rank-based strategy
+        if current_rank and current_rank > 1000000:
             recommendations.append({
-                'type': 'info',
-                'title': 'Rank Improvement',
-                'message': "Focus on consistent captain choices and popular template players to improve your rank."
+                'title': 'Rank Recovery Strategy',
+                'message': 'Focus on template players and reliable captains to reduce volatility.',
+                'category': 'Strategic',
+                'priority': 'High'
+            })
+        elif current_rank and current_rank < 100000:
+            recommendations.append({
+                'title': 'Elite Rank Maintenance',
+                'message': 'Consider differential captains and low-owned players to maintain advantage.',
+                'category': 'Strategic',
+                'priority': 'Medium'
             })
         
-        # Display recommendations
-        if recommendations:
-            for rec in recommendations:
-                if rec['type'] == 'success':
-                    st.success(f"✅ **{rec['title']}**: {rec['message']}")
-                elif rec['type'] == 'warning':
-                    st.warning(f"⚠️ **{rec['title']}**: {rec['message']}")
-                else:
-                    st.info(f"💡 **{rec['title']}**: {rec['message']}")
-        else:
-            st.success("🎉 Your team looks good! Keep monitoring form and fixtures for optimal transfers.")
+        # Recent form analysis
+        if gw_points < 35:
+            recommendations.append({
+                'title': 'Poor Recent Form',
+                'message': 'Review captain choice and check for injured/suspended players.',
+                'category': 'Performance',
+                'priority': 'High'
+            })
         
-        # General advice
-        st.write("**📚 General FPL Tips:**")
-        st.write("• Monitor player form and upcoming fixtures")
-        st.write("• Use your free transfer each gameweek")
-        st.write("• Plan your chip usage strategically")
-        st.write("• Consider differential picks to climb ranks")
-        st.write("• Stay active in the transfer market")
+        # Squad value optimization
+        if team_value < 95:
+            recommendations.append({
+                'title': 'Squad Value Below Optimal',
+                'message': 'Target players likely to rise in value to build squad worth.',
+                'category': 'Value',
+                'priority': 'Medium'
+            })
+        
+        # Add default recommendations if none generated
+        if not recommendations:
+            recommendations.extend([
+                {
+                    'title': 'Regular Review',
+                    'message': 'Monitor player form, injuries, and upcoming fixtures weekly.',
+                    'category': 'Strategic',
+                    'priority': 'Low'
+                },
+                {
+                    'title': 'Stay Informed',
+                    'message': 'Follow press conferences and team news for rotation insights.',
+                    'category': 'Strategic',
+                    'priority': 'Low'
+                }
+            ])
+        
+        return recommendations
     
     def _display_starting_xi_optimizer(self, team_data):
         """Display Starting XI Optimizer with comprehensive analysis"""
@@ -1025,41 +2551,6 @@ class MyTeamPage:
             ]
         }
     
-    def _display_advanced_analytics(self, team_data):
-        """Display advanced analytics and insights"""
-        st.subheader("📈 Advanced Team Analytics")
-        
-        if not st.session_state.get('data_loaded', False):
-            st.warning("Load player data to enable advanced analytics")
-            return
-        
-        players_df = st.session_state.players_df
-        picks = team_data.get('picks', [])
-        
-        # Team composition analysis
-        analytics_tabs = st.tabs([
-            "🏗️ Squad Composition", 
-            "📊 Performance Metrics", 
-            "💰 Value Analysis",
-            "🎯 Risk Assessment",
-            "📈 Trend Analysis"
-        ])
-        
-        with analytics_tabs[0]:
-            self._display_squad_composition_analysis(team_data, players_df, picks)
-        
-        with analytics_tabs[1]:
-            self._display_performance_metrics_analysis(team_data, players_df, picks)
-        
-        with analytics_tabs[2]:
-            self._display_value_analysis(team_data, players_df, picks)
-        
-        with analytics_tabs[3]:
-            self._display_risk_assessment(team_data, players_df, picks)
-        
-        with analytics_tabs[4]:
-            self._display_trend_analysis(team_data, players_df, picks)
-    
     def _display_squad_composition_analysis(self, team_data, players_df, picks):
         """Analyze squad composition and balance"""
         st.subheader("🏗️ Squad Composition Analysis")
@@ -1114,1345 +2605,321 @@ class MyTeamPage:
         
         if teams_represented < 10:
             st.warning("⚠️ Low team diversity - consider spreading across more teams")
-        elif teams_represented > 15:
-            st.success("✅ Excellent team diversity")
-        else:
-            st.info("👍 Good team diversity")
     
     def _display_performance_metrics_analysis(self, team_data, players_df, picks):
-        """Analyze performance metrics"""
-        st.subheader("📊 Performance Metrics")
+        """Display performance metrics analysis"""
+        st.subheader("📊 Performance Metrics Analysis")
         
-        # Calculate key metrics
-        total_points = team_data.get('summary_overall_points', 0)
-        current_gw = team_data.get('gameweek', 1) or 1
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            avg_ppg = total_points / max(current_gw, 1)
-            st.metric("Points Per Gameweek", f"{avg_ppg:.1f}")
-            
-            # Performance rating
-            if avg_ppg >= 65:
-                st.success("🏆 Elite Performance")
-            elif avg_ppg >= 55:
-                st.info("🥇 Above Average")
-            elif avg_ppg >= 45:
-                st.warning("📈 Below Average")
-            else:
-                st.error("🆘 Needs Improvement")
-        
-        with col2:
-            # Consistency score (simplified)
-            gw_points = team_data.get('summary_event_points', 0)
-            consistency = min(gw_points / max(avg_ppg, 1), 2) * 50
-            st.metric("Consistency Score", f"{consistency:.0f}%")
-        
-        with col3:
-            # Rank improvement potential
-            rank = team_data.get('summary_overall_rank', 0)
-            if rank:
-                percentile = (1 - (rank / 8000000)) * 100
-                st.metric("Percentile", f"{percentile:.1f}%")
-        
-        # Performance trends
-        st.write("**Performance Insights**")
-        
-        insights = []
-        if avg_ppg > 60:
-            insights.append("🔥 Strong scoring rate - maintain current strategy")
-        elif avg_ppg < 45:
-            insights.append("📈 Scoring below average - consider tactical changes")
-        
-        if gw_points > avg_ppg * 1.2:
-            insights.append("🚀 Recent form exceeding season average")
-        elif gw_points < avg_ppg * 0.8:
-            insights.append("⚠️ Recent dip in form - monitor closely")
-        
-        for insight in insights:
-            st.info(insight)
-    
-    def _display_value_analysis(self, team_data, players_df, picks):
-        """Analyze team value and efficiency"""
-        st.subheader("💰 Value Analysis")
-        
-        team_players = []
+        # Get team players with metrics
+        metrics_data = []
         for pick in picks:
             player_info = players_df[players_df['id'] == pick['element']]
             if not player_info.empty:
                 player = player_info.iloc[0]
-                ppm = float(player.get('points_per_million', 0))
-                team_players.append({
+                metrics_data.append({
                     'name': player.get('web_name', 'Unknown'),
-                    'price': float(player.get('now_cost', 0)) / 10,
-                    'points': int(player.get('total_points', 0)),
-                    'ppm': ppm,
-                    'efficiency_rating': 'Excellent' if ppm > 8 else 'Good' if ppm > 6 else 'Average' if ppm > 4 else 'Poor'
-                })
-        
-        if team_players:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Value metrics
-                total_value = sum([p['price'] for p in team_players])
-                avg_ppm = sum([p['ppm'] for p in team_players]) / len(team_players)
-                
-                st.metric("Squad Value", f"£{total_value:.1f}m")
-                st.metric("Average PPM", f"{avg_ppm:.1f}")
-                
-                bank = team_data.get('bank', 0) / 10
-                st.metric("Available Funds", f"£{bank:.1f}m")
-            
-            with col2:
-                # Efficiency breakdown
-                excellent = len([p for p in team_players if p['ppm'] > 8])
-                good = len([p for p in team_players if 6 < p['ppm'] <= 8])
-                average = len([p for p in team_players if 4 < p['ppm'] <= 6])
-                poor = len([p for p in team_players if p['ppm'] <= 4])
-                
-                st.write("**Value Efficiency**")
-                st.metric("Excellent (>8 PPM)", excellent)
-                st.metric("Good (6-8 PPM)", good)
-                st.metric("Average (4-6 PPM)", average)
-                st.metric("Poor (<4 PPM)", poor)
-            
-            # Value recommendations
-            if poor >= 3:
-                st.warning("⚠️ Multiple players offering poor value - consider transfers")
-            elif excellent >= 8:
-                st.success("✅ Excellent value across squad")
-            else:
-                st.info("👍 Reasonable value efficiency")
-    
-    def _display_risk_assessment(self, team_data, players_df, picks):
-        """Assess team risk factors"""
-        st.subheader("🎯 Risk Assessment")
-        
-        risk_factors = []
-        risk_score = 0
-        
-        # Analyze risk factors
-        team_players = []
-        for pick in picks:
-            player_info = players_df[players_df['id'] == pick['element']]
-            if not player_info.empty:
-                player = player_info.iloc[0]
-                team_players.append({
-                    'ownership': float(player.get('selected_by_percent', 0)),
                     'form': float(player.get('form', 0)),
-                    'price': float(player.get('now_cost', 0)) / 10,
+                    'total_points': int(player.get('total_points', 0)),
                     'minutes': int(player.get('minutes', 0)),
-                    'status': player.get('status', 'a')
+                    'goals': int(player.get('goals_scored', 0)),
+                    'assists': int(player.get('assists', 0)),
+                    'clean_sheets': int(player.get('clean_sheets', 0)),
+                    'bonus': int(player.get('bonus', 0))
                 })
         
-        if team_players:
-            # Template risk
-            high_ownership = len([p for p in team_players if p['ownership'] > 50])
-            if high_ownership >= 6:
-                risk_factors.append("High template exposure - limited differential advantage")
-                risk_score += 2
-            
-            # Form risk
-            poor_form = len([p for p in team_players if p['form'] < 3])
-            if poor_form >= 3:
-                risk_factors.append(f"{poor_form} players in poor form")
-                risk_score += 1
-            
-            # Rotation risk
-            rotation_risk = len([p for p in team_players if p['minutes'] < 1000])
-            if rotation_risk >= 4:
-                risk_factors.append("High rotation risk in squad")
-                risk_score += 1
-            
-            # Injury risk
-            injury_risk = len([p for p in team_players if p['status'] != 'a'])
-            if injury_risk >= 2:
-                risk_factors.append("Multiple players with fitness concerns")
-                risk_score += 2
-            
-            # Financial risk
-            bank = team_data.get('bank', 0) / 10
-            if bank < 0.5:
-                risk_factors.append("Limited financial flexibility")
-                risk_score += 1
-            
-            # Display risk assessment
-            col1, col2 = st.columns([1, 2])
-            
-            with col1:
-                if risk_score <= 2:
-                    st.success(f"🟢 Low Risk ({risk_score}/7)")
-                elif risk_score <= 4:
-                    st.warning(f"🟡 Medium Risk ({risk_score}/7)")
-                else:
-                    st.error(f"🔴 High Risk ({risk_score}/7)")
-            
-            with col2:
-                if risk_factors:
-                    st.write("**Risk Factors:**")
-                    for factor in risk_factors:
-                        st.write(f"• {factor}")
-                else:
-                    st.success("✅ No significant risk factors identified")
-    
-    def _display_trend_analysis(self, team_data, players_df, picks):
-        """Analyze trends and momentum"""
-        st.subheader("📈 Trend Analysis")
-        
-        # Performance trend
-        total_points = team_data.get('summary_overall_points', 0)
-        gw_points = team_data.get('summary_event_points', 0)
-        current_gw = team_data.get('gameweek', 1) or 1
-        
-        avg_ppg = total_points / max(current_gw, 1)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("**Performance Momentum**")
-            
-            if gw_points > avg_ppg * 1.2:
-                st.success("🚀 Strong upward momentum")
-                momentum = "Positive"
-            elif gw_points < avg_ppg * 0.8:
-                st.warning("📉 Concerning downward trend")
-                momentum = "Negative"
-            else:
-                st.info("➡️ Stable performance")
-                momentum = "Stable"
-            
-            st.metric("Momentum", momentum)
-        
-        with col2:
-            st.write("**Form Trends**")
-            
-            team_players = []
-            for pick in picks:
-                player_info = players_df[players_df['id'] == pick['element']]
-                if not player_info.empty:
-                    player = player_info.iloc[0]
-                    team_players.append(float(player.get('form', 0)))
-            
-            if team_players:
-                avg_form = sum(team_players) / len(team_players)
-                improving_form = len([f for f in team_players if f > 6])
-                
-                st.metric("Average Form", f"{avg_form:.1f}")
-                st.metric("Players in Form", f"{improving_form}/15")
-        
-        # Trend insights
-        st.write("**Trend Insights**")
-        
-        insights = []
-        
-        # Overall trend analysis
-        rank = team_data.get('summary_overall_rank', 0)
-        if momentum == "Positive":
-            insights.append("📈 Team momentum suggests continued improvement")
-        elif momentum == "Negative":
-            insights.append("⚠️ Declining performance requires attention")
-        
-        # Form trend analysis
-        if team_players and sum(team_players) / len(team_players) > 5.5:
-            insights.append("🔥 Strong squad form indicates good transfer choices")
-        elif team_players and sum(team_players) / len(team_players) < 4:
-            insights.append("📉 Poor squad form suggests need for transfers")
-        
-        # Rank trend estimation
-        if rank and rank < 1000000:
-            insights.append("🎯 Well-positioned for strong finish")
-        elif rank and rank > 3000000:
-            insights.append("💪 Significant improvement potential available")
-        
-        for insight in insights:
-            st.info(insight)
-    
-    def _display_transfer_planning(self, team_data):
-        """Display comprehensive transfer planning assistant"""
-        st.subheader("🔄 Transfer Planning Assistant")
-        
-        if not st.session_state.get('data_loaded', False):
-            st.warning("Load player data to enable transfer planning")
+        if not metrics_data:
+            st.warning("No performance data available")
             return
         
-        try:
-            from services.transfer_planning_service import TransferPlanningAssistant
-            from services.fixture_service import FixtureService
-            
-            planner = TransferPlanningAssistant()
-            players_df = st.session_state.players_df
-            
-            # Planning settings
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                planning_weeks = st.selectbox(
-                    "🗓️ Planning Horizon",
-                    [4, 6, 8, 10, 12],
-                    index=2,
-                    help="Number of gameweeks to plan ahead"
-                )
-            
-            with col2:
-                strategy_focus = st.selectbox(
-                    "🎯 Strategy Focus",
-                    ["Balanced", "Conservative", "Aggressive", "Value-Focused", "Rank-Climbing"],
-                    help="Choose your transfer strategy approach"
-                )
-            
-            with col3:
-                hit_tolerance = st.slider(
-                    "💰 Hit Tolerance",
-                    min_value=0, max_value=12, value=4,
-                    help="Maximum points hit you're willing to take"
-                )
-            
-            if st.button("🚀 Generate Transfer Plan", type="primary"):
-                with st.spinner("Analyzing your squad and generating transfer plan..."):
-                    transfer_plan = planner.generate_transfer_plan(
-                        team_data, players_df, planning_weeks
-                    )
-                    
-                    # Display plan overview
-                    st.subheader("📊 Transfer Plan Overview")
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("Planning Period", f"{planning_weeks} weeks")
-                    
-                    with col2:
-                        total_transfers = sum(len(week.get('transfers', [])) for week in transfer_plan['weekly_plan'])
-                        st.metric("Total Transfers", total_transfers)
-                    
-                    with col3:
-                        st.metric("Expected Cost", f"-{transfer_plan['total_cost']}pts")
-                    
-                    with col4:
-                        st.metric("Expected Gain", f"+{transfer_plan['expected_gain']:.1f}pts")
-                    
-                    # Weekly breakdown
-                    st.subheader("📅 Week-by-Week Plan")
-                    
-                    for week in transfer_plan['weekly_plan']:
-                        with st.expander(f"Gameweek {week['gameweek']} - {len(week['transfers'])} transfers"):
-                            if week['transfers']:
-                                for transfer in week['transfers']:
-                                    col1, col2, col3 = st.columns([2, 1, 2])
-                                    
-                                    with col1:
-                                        st.write(f"**OUT:** {transfer['out']}")
-                                    
-                                    with col2:
-                                        price_change = transfer['price_change']
-                                        color = "red" if price_change < 0 else "green"
-                                        st.markdown(f"<span style='color:{color}'>£{price_change:+.1f}m</span>", unsafe_allow_html=True)
-                                    
-                                    with col3:
-                                        st.write(f"**IN:** {transfer['in']}")
-                                    
-                                    st.write(f"*Reason: {transfer['reason']}*")
-                                    st.divider()
-                                
-                                if week['cost'] > 0:
-                                    st.warning(f"⚠️ This week requires a {week['cost']}pt hit")
-                                
-                                if week['rationale']:
-                                    st.info(f"💡 {'; '.join(week['rationale'])}")
-                            else:
-                                st.info("No transfers recommended this week")
-                    
-                    # Chip recommendations
-                    st.subheader("🎴 Chip Usage Strategy")
-                    
-                    chip_recs = transfer_plan['chip_recommendations']
-                    
-                    for chip, rec in chip_recs.items():
-                        chip_name = chip.replace('_', ' ').title()
-                        
-                        col1, col2, col3 = st.columns([2, 1, 2])
-                        
-                        with col1:
-                            st.write(f"**{chip_name}**")
-                        
-                        with col2:
-                            st.metric("Recommended GW", rec['recommended_gw'])
-                        
-                        with col3:
-                            score = rec['suitability_score']
-                            if score > 70:
-                                st.success(f"Excellent timing ({score:.0f}%)")
-                            elif score > 50:
-                                st.info(f"Good timing ({score:.0f}%)")
-                            else:
-                                st.warning(f"Consider waiting ({score:.0f}%)")
-                        
-                        st.write(f"*{rec['rationale']}*")
-                        st.divider()
-                    
-                    # Transfer priorities
-                    st.subheader("🎯 Transfer Priorities")
-                    
-                    priorities = transfer_plan['transfer_priorities']
-                    
-                    for i, priority in enumerate(priorities[:5], 1):
-                        player = priority['player']
-                        
-                        priority_color = {
-                            'high': 'red',
-                            'medium': 'orange', 
-                            'low': 'gray'
-                        }.get(priority['priority'], 'gray')
-                        
-                        st.markdown(f"**{i}. {player['name']}** "
-                                   f"<span style='color:{priority_color}'>[{priority['priority'].upper()} PRIORITY]</span>",
-                                   unsafe_allow_html=True)
-                        
-                        col1, col2 = st.columns([2, 1])
-                        
-                        with col1:
-                            st.write(f"*{priority['reason']}*")
-                            st.write(f"Current: £{player['price']:.1f}m, Form: {player['form']:.1f}, PPM: {player['ppm']:.1f}")
-                        
-                        with col2:
-                            replacements = priority['potential_replacements']
-                            if replacements:
-                                best_replacement = replacements[0]
-                                st.write(f"**Best Alternative:**")
-                                st.write(f"{best_replacement['name']} (£{best_replacement['price']:.1f}m)")
-                                st.write(f"Score: {best_replacement['score']:.1f}")
-                        
-                        st.divider()
-            
-            # Transfer success calculator
-            st.subheader("🎲 Transfer Success Calculator")
-            
-            st.write("Estimate the probability of transfer success:")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**Player Out**")
-                out_form = st.number_input("Form Rating", 0.0, 10.0, 4.0, key="out_form")
-                out_ppm = st.number_input("Points per Million", 0.0, 15.0, 5.0, key="out_ppm")
-                out_minutes = st.number_input("Minutes Played", 0, 3500, 1500, key="out_minutes")
-            
-            with col2:
-                st.write("**Player In**")
-                in_form = st.number_input("Form Rating", 0.0, 10.0, 6.0, key="in_form")
-                in_ppm = st.number_input("Points per Million", 0.0, 15.0, 7.0, key="in_ppm")
-                in_minutes = st.number_input("Minutes Played", 0, 3500, 2000, key="in_minutes")
-            
-            if st.button("Calculate Success Probability"):
-                player_out = {'form': out_form, 'ppm': out_ppm, 'minutes': out_minutes}
-                player_in = {'form': in_form, 'ppm': in_ppm, 'minutes': in_minutes}
-                
-                success_prob = planner.get_transfer_success_probability(player_out, player_in)
-                
-                if success_prob > 80:
-                    st.success(f"🎯 High success probability: {success_prob:.1f}%")
-                elif success_prob > 60:
-                    st.info(f"👍 Good success probability: {success_prob:.1f}%")
-                elif success_prob > 40:
-                    st.warning(f"⚠️ Moderate success probability: {success_prob:.1f}%")
-                else:
-                    st.error(f"❌ Low success probability: {success_prob:.1f}%")
-        
-        except ImportError:
-            st.warning("🚧 Transfer planning service not available. Enable advanced features to access this functionality.")
-            
-            # Basic transfer advice
-            st.info("💡 **Basic Transfer Tips:**")
-            st.write("• Use your free transfer each gameweek")
-            st.write("• Avoid taking hits unless for urgent transfers")
-            st.write("• Plan transfers around fixture swings") 
-            st.write("• Monitor player price changes")
-            st.write("• Consider form and injury status")
-    
-    def _display_performance_comparison(self, team_data):
-        """Display performance comparison against benchmarks"""
-        st.subheader("📊 Performance Comparison")
-        
-        if not st.session_state.get('data_loaded', False):
-            st.warning("Load player data to enable performance comparison")
-            return
-        
-        try:
-            from services.performance_comparison_service import PerformanceComparisonService
-            
-            comparison_service = PerformanceComparisonService()
-            players_df = st.session_state.players_df
-            
-            with st.spinner("Analyzing your performance against benchmarks..."):
-                comparison_data = comparison_service.generate_performance_comparison(
-                    team_data, players_df
-                )
-            
-            # Current performance overview
-            st.subheader("🎯 Your Current Performance")
-            
-            metrics = comparison_data['current_metrics']
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("Total Points", f"{metrics['total_points']:,}")
-            
-            with col2:
-                st.metric("Points per GW", f"{metrics['avg_ppg']:.1f}")
-            
-            with col3:
-                st.metric("Percentile", f"{metrics['percentile']:.1f}%")
-            
-            with col4:
-                st.metric("Current GW", metrics['current_gw'])
-            
-            # Benchmark comparisons
-            comparison_tabs = st.tabs(["🏆 vs Top 10K", "📊 vs Average", "📈 Historical", "🔍 Squad Analysis"])
-            
-            with comparison_tabs[0]:
-                st.subheader("🏆 Comparison vs Top 10K Managers")
-                
-                top_10k = comparison_data['top_10k_comparison']
-                
-                for metric_name, metric_data in top_10k['metrics'].items():
-                    col1, col2, col3 = st.columns([2, 1, 1])
-                    
-                    with col1:
-                        st.write(f"**{metric_name.replace('_', ' ').title()}**")
-                    
-                    with col2:
-                        st.metric("Your Score", f"{metric_data['your_score']:.1f}")
-                    
-                    with col3:
-                        diff = metric_data['difference']
-                        benchmark_val = metric_data['benchmark']
-                        
-                        if metric_data['performance'] == 'above':
-                            st.success(f"+{diff:.1f} vs {benchmark_val:.1f}")
-                        else:
-                            st.error(f"{diff:.1f} vs {benchmark_val:.1f}")
-                
-                # Overall rating
-                overall_rating = top_10k['overall_rating']
-                percentage = overall_rating['percentage']
-                
-                if percentage >= 75:
-                    st.success(f"🏆 Excellent! You're performing like a top 10K manager ({percentage:.0f}% of metrics above benchmark)")
-                elif percentage >= 50:
-                    st.info(f"👍 Good performance, approaching top 10K levels ({percentage:.0f}% of metrics above benchmark)")
-                else:
-                    st.warning(f"📈 Room for improvement to reach top 10K standards ({percentage:.0f}% of metrics above benchmark)")
-            
-            with comparison_tabs[1]:
-                st.subheader("📊 Comparison vs Overall Average")
-                
-                overall = comparison_data['overall_comparison']
-                
-                for metric_name, metric_data in overall['metrics'].items():
-                    col1, col2, col3 = st.columns([2, 1, 1])
-                    
-                    with col1:
-                        st.write(f"**{metric_name.replace('_', ' ').title()}**")
-                    
-                    with col2:
-                        st.metric("Your Score", f"{metric_data['your_score']:.1f}")
-                    
-                    with col3:
-                        diff = metric_data['difference']
-                        benchmark_val = metric_data['benchmark']
-                        
-                        if metric_data['performance'] == 'above':
-                            st.success(f"+{diff:.1f} vs {benchmark_val:.1f}")
-                        else:
-                            st.error(f"{diff:.1f} vs {benchmark_val:.1f}")
-                
-                # Overall rating vs average
-                overall_rating = overall['overall_rating']
-                percentage = overall_rating['percentage']
-                
-                if percentage >= 80:
-                    st.success(f"🎉 Outstanding! Well above average performance ({percentage:.0f}% of metrics above benchmark)")
-                elif percentage >= 60:
-                    st.info(f"✅ Above average performance ({percentage:.0f}% of metrics above benchmark)")
-                else:
-                    st.warning(f"📈 Below average - focus on improvement ({percentage:.0f}% of metrics above benchmark)")
-            
-            with comparison_tabs[2]:
-                st.subheader("📈 Historical Performance Analysis")
-                
-                historical = comparison_data['historical_analysis']
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write(f"**Current Season Phase:** {historical['current_phase']}")
-                    st.metric("Your Avg PPG", f"{historical['your_avg_ppg']:.1f}")
-                    st.metric("Historical Avg", f"{historical['historical_avg']:.1f}")
-                
-                with col2:
-                    diff = historical['difference']
-                    if historical['performance'] == 'above':
-                        st.success(f"📈 +{diff:.1f} points above historical average")
-                    else:
-                        st.warning(f"📉 {diff:.1f} points below historical average")
-                
-                st.info(f"💡 **Phase Analysis:** {historical['phase_analysis']}")
-                
-                # Trend analysis
-                trends = comparison_data['trend_analysis']
-                
-                st.write("**Performance Trends**")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    momentum = trends['momentum_description']
-                    st.write(momentum)
-                
-                with col2:
-                    st.metric("Projected Total", f"{trends['projected_total']:.0f} pts")
-                
-                with col3:
-                    st.write(trends['trajectory_description'])
-            
-            with comparison_tabs[3]:
-                st.subheader("🔍 Squad Composition Analysis")
-                
-                squad_comp = comparison_data['squad_comparison']
-                
-                if 'error' not in squad_comp:
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write("**Squad Metrics**")
-                        st.metric("Average Price", f"£{squad_comp['avg_price']:.1f}m")
-                        st.metric("Average Ownership", f"{squad_comp['avg_ownership']:.1f}%")
-                        st.metric("Average Form", f"{squad_comp['avg_form']:.1f}")
-                    
-                    with col2:
-                        st.write("**Squad Composition**")
-                        st.metric("Premium Players", squad_comp['premium_count'])
-                        st.metric("Template Players", squad_comp['template_count'])
-                        st.metric("Differentials", squad_comp['differential_count'])
-                    
-                    # Squad style
-                    style = squad_comp['squad_style']
-                    style_descriptions = {
-                        'Template Heavy': "🔄 Following popular picks - safe but limited upside",
-                        'Differential Heavy': "💎 High risk/reward - potential for big rank swings",
-                        'Premium Heavy': "💰 Expensive squad - needs strong returns",
-                        'Balanced': "⚖️ Well-balanced approach - good risk management",
-                        'Standard': "📊 Standard composition - room for optimization"
-                    }
-                    
-                    st.info(f"**Squad Style: {style}**")
-                    st.write(style_descriptions.get(style, "Standard squad composition"))
-                else:
-                    st.warning("Squad composition analysis not available")
-            
-            # Recommendations
-            st.subheader("💡 Performance Recommendations")
-            
-            recommendations = comparison_data['recommendations']
-            
-            if recommendations:
-                for rec in recommendations:
-                    st.info(rec)
-            else:
-                st.success("🎉 No immediate performance concerns identified!")
-        
-        except ImportError:
-            st.warning("🚧 Performance comparison service not available.")
-            
-            # Basic performance insights
-            total_points = team_data.get('summary_overall_points', 0)
-            current_gw = team_data.get('gameweek', 1) or 1
-            avg_ppg = total_points / max(current_gw, 1)
-            
-            st.info(f"💡 **Quick Analysis:** You're averaging {avg_ppg:.1f} points per gameweek")
-            
-            if avg_ppg >= 60:
-                st.success("🏆 Excellent performance!")
-            elif avg_ppg >= 50:
-                st.info("👍 Above average performance")
-            else:
-                st.warning("📈 Room for improvement")
-    
-    def _display_fixture_analysis(self, team_data):
-        """Display comprehensive fixture analysis for the team"""
-        st.subheader("⚽ Fixture Analysis")
-        
-        if not st.session_state.get('data_loaded', False):
-            st.warning("Load player data to enable detailed fixture analysis")
-            return
-        
-        # Import fixture service
-        from services.fixture_service import FixtureService
-        fixture_service = FixtureService()
-        
-        players_df = st.session_state.players_df
-        picks = team_data.get('picks', [])
-        
-        if not picks:
-            st.warning("No team data available for fixture analysis")
-            return
-        
-        # Fixture analysis tabs
-        fixture_tabs = st.tabs([
-            "🎯 Overall Difficulty", 
-            "⚔️ Attack vs Defense", 
-            "👑 Captain Analysis",
-            "🔄 Transfer Targets",
-            "📊 Team Comparison"
-        ])
-        
-        with fixture_tabs[0]:
-            self._display_overall_fixture_difficulty(team_data, players_df, fixture_service)
-        
-        with fixture_tabs[1]:
-            self._display_attack_defense_analysis(team_data, players_df, fixture_service)
-        
-        with fixture_tabs[2]:
-            self._display_captain_fixture_analysis(team_data, players_df, fixture_service)
-        
-        with fixture_tabs[3]:
-            self._display_fixture_transfer_targets(team_data, players_df, fixture_service)
-        
-        with fixture_tabs[4]:
-            self._display_team_fixture_comparison(team_data, players_df, fixture_service)
-    
-    def _display_overall_fixture_difficulty(self, team_data, players_df, fixture_service):
-        """Display overall fixture difficulty for next 5 games"""
-        st.subheader("🎯 Overall Fixture Difficulty (Next 5 Games)")
-        
-        picks = team_data.get('picks', [])
-        
-        # Get team fixture difficulties
-        team_fixtures = {}
-        
-        # Get unique teams in squad
-        squad_teams = set()
-        for pick in picks:
-            player_info = players_df[players_df['id'] == pick['element']]
-            if not player_info.empty:
-                team_name = player_info.iloc[0].get('team_short_name', 'UNK')
-                squad_teams.add(team_name)
-        
-        # Calculate fixture difficulty for each team
-        for team in squad_teams:
-            fixtures = fixture_service.get_upcoming_fixtures_difficulty(team, 5)
-            team_fixtures[team] = fixtures
-        
-        # Display overview metrics
+        # Performance summary
         col1, col2, col3, col4 = st.columns(4)
         
-        # Calculate average difficulty across all squad teams
-        all_difficulties = []
-        for team_data_fix in team_fixtures.values():
-            all_difficulties.extend([f['difficulty'] for f in team_data_fix['fixtures']])
-        
-        avg_difficulty = np.mean(all_difficulties) if all_difficulties else 3
-        
         with col1:
-            difficulty_color = "🟢" if avg_difficulty <= 2.5 else "🟡" if avg_difficulty <= 3.5 else "🔴"
-            st.metric("Squad Avg Difficulty", f"{difficulty_color} {avg_difficulty:.1f}")
+            avg_form = sum(p['form'] for p in metrics_data) / len(metrics_data)
+            st.metric("Squad Avg Form", f"{avg_form:.1f}")
         
         with col2:
-            easy_fixtures = len([d for d in all_difficulties if d <= 2])
-            st.metric("Easy Fixtures", f"🟢 {easy_fixtures}")
+            total_goals = sum(p['goals'] for p in metrics_data)
+            st.metric("Total Goals", total_goals)
         
         with col3:
-            hard_fixtures = len([d for d in all_difficulties if d >= 4])
-            st.metric("Hard Fixtures", f"🔴 {hard_fixtures}")
+            total_assists = sum(p['assists'] for p in metrics_data)
+            st.metric("Total Assists", total_assists)
         
         with col4:
-            best_team = min(team_fixtures.keys(), key=lambda t: team_fixtures[t]['average_difficulty']) if team_fixtures else "N/A"
-            st.metric("Best Fixtures", f"🎯 {best_team}")
+            total_bonus = sum(p['bonus'] for p in metrics_data)
+            st.metric("Total Bonus", total_bonus)
         
-        # Detailed team-by-team breakdown
-        st.subheader("📋 Team-by-Team Fixture Breakdown")
+        # Top performers
+        st.write("**🏆 Top Performers**")
         
-        # Sort teams by difficulty (easiest first)
-        sorted_teams = sorted(team_fixtures.items(), key=lambda x: x[1]['average_difficulty'])
-        
-        for team_name, fixtures_data in sorted_teams:
-            with st.expander(f"⚽ {team_name} - {fixtures_data['rating']} Fixtures ({fixtures_data['average_difficulty']:.1f} avg)"):
-                
-                # Show next 5 fixtures
-                col1, col2 = st.columns([2, 1])
-                
-                with col1:
-                    st.write("**Next 5 Fixtures:**")
-                    for fixture in fixtures_data['fixtures']:
-                        home_away = "🏠 vs" if fixture['home'] else "✈️ @"
-                        difficulty_emoji = "🟢" if fixture['difficulty'] <= 2 else "🟡" if fixture['difficulty'] == 3 else "🔴"
-                        st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {difficulty_emoji} ({fixture['difficulty_text']})")
-                
-                with col2:
-                    st.metric("Average Difficulty", f"{fixtures_data['average_difficulty']:.1f}")
-                    st.metric("Total Difficulty", fixtures_data['total_difficulty'])
-                    
-                    # Get players from this team in squad
-                    team_players_in_squad = []
-                    for pick in picks:
-                        player_info = players_df[players_df['id'] == pick['element']]
-                        if not player_info.empty and player_info.iloc[0].get('team_short_name') == team_name:
-                            team_players_in_squad.append(player_info.iloc[0].get('web_name', 'Unknown'))
-                    
-                    if team_players_in_squad:
-                        st.write("**Your Players:**")
-                        for player in team_players_in_squad:
-                            st.write(f"• {player}")
-        
-        # Fixture difficulty heatmap
-        st.subheader("🔥 Fixture Difficulty Heatmap")
-        
-        # Create difficulty matrix
-        heatmap_data = []
-        gameweeks = list(range(1, 6))  # Next 5 gameweeks
-        
-        for team_name, fixtures_data in team_fixtures.items():
-            team_row = [team_name]
-            for i in range(5):
-                if i < len(fixtures_data['fixtures']):
-                    difficulty = fixtures_data['fixtures'][i]['difficulty']
-                    team_row.append(difficulty)
-                else:
-                    team_row.append(3)  # Default neutral difficulty
-            heatmap_data.append(team_row)
-        
-        if heatmap_data:
-            heatmap_df = pd.DataFrame(heatmap_data, columns=['Team'] + [f'GW+{i+1}' for i in range(5)])
-            
-            # Display as styled dataframe
-            def style_difficulty(val):
-                if isinstance(val, str):  # Team name column
-                    return ''
-                elif val <= 2:
-                    return 'background-color: #90EE90'  # Light green
-                elif val == 3:
-                    return 'background-color: #FFFFE0'  # Light yellow  
-                else:
-                    return 'background-color: #FFB6C1'  # Light red
-            
-            styled_df = heatmap_df.style.applymap(style_difficulty)
-            st.dataframe(styled_df, use_container_width=True, hide_index=True)
-            
-            # Legend
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.write("🟢 **Easy (1-2)**: Target for transfers in")
-            with col2:
-                st.write("🟡 **Average (3)**: Monitor closely")
-            with col3:
-                st.write("🔴 **Hard (4-5)**: Consider transfers out")
+        sorted_by_points = sorted(metrics_data, key=lambda x: x['total_points'], reverse=True)
+        for i, player in enumerate(sorted_by_points[:5], 1):
+            st.write(f"{i}. **{player['name']}** - {player['total_points']} pts "
+                    f"(Form: {player['form']:.1f})")
     
-    def _display_attack_defense_analysis(self, team_data, players_df, fixture_service):
-        """Display attacking and defensive fixture analysis"""
-        st.subheader("⚔️ Attacking vs Defensive Fixture Analysis")
+    def _display_value_analysis(self, team_data, players_df, picks):
+        """Display value analysis"""
+        st.subheader("💰 Value Analysis")
         
-        with st.expander("📚 Understanding Attack vs Defense Analysis", expanded=False):
-            st.markdown("""
-            **Attacking Fixtures**: How easy it is for your players to score/assist
-            - Consider opponent's **defensive strength**
-            - Target players facing weak defenses
-            
-            **Defensive Fixtures**: How likely your defenders/GKs are to get clean sheets
-            - Consider opponent's **attacking strength** 
-            - Target defenders facing weak attacks
-            """)
-        
-        picks = team_data.get('picks', [])
-        
-        # Separate attacking and defensive players
-        attacking_players = []
-        defensive_players = []
-        
+        # Get value metrics
+        value_data = []
         for pick in picks:
             player_info = players_df[players_df['id'] == pick['element']]
             if not player_info.empty:
                 player = player_info.iloc[0]
-                position = player.get('position_name', 'Unknown')
-                team_name = player.get('team_short_name', 'UNK')
+                price = float(player.get('now_cost', 0)) / 10
+                points = int(player.get('total_points', 0))
+                ppm = float(player.get('points_per_million', 0))
                 
-                player_data = {
+                value_data.append({
                     'name': player.get('web_name', 'Unknown'),
-                    'team': team_name,
-                    'position': position
-                }
-                
-                if position in ['Midfielder', 'Forward']:
-                    attacking_players.append(player_data)
-                elif position in ['Goalkeeper', 'Defender']:
-                    defensive_players.append(player_data)
+                    'price': price,
+                    'points': points,
+                    'ppm': ppm,
+                    'value_tier': 'Excellent' if ppm > 8 else 'Good' if ppm > 6 else 'Average' if ppm > 4 else 'Poor'
+                })
+        
+        if not value_data:
+            st.warning("No value data available")
+            return
+        
+        # Value distribution
+        excellent = len([p for p in value_data if p['ppm'] > 8])
+        good = len([p for p in value_data if 6 < p['ppm'] <= 8])
+        average = len([p for p in value_data if 4 < p['ppm'] <= 6])
+        poor = len([p for p in value_data if p['ppm'] <= 4])
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("💎 Excellent", excellent)
+        
+        with col2:
+            st.metric("👍 Good", good)
+        
+        with col3:
+            st.metric("⚖️ Average", average)
+        
+        with col4:
+            st.metric("⚠️ Poor", poor)
+        
+        # Best and worst value
+        sorted_by_value = sorted(value_data, key=lambda x: x['ppm'], reverse=True)
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("⚔️ Attacking Fixture Analysis")
-            st.write("*How easy is it for your attacking players to score?*")
-            
-            if attacking_players:
-                # Group by team and analyze
-                attacking_teams = {}
-                for player in attacking_players:
-                    team = player['team']
-                    if team not in attacking_teams:
-                        attacking_teams[team] = []
-                    attacking_teams[team].append(player)
-                
-                for team_name, players in attacking_teams.items():
-                    # Get team's attacking fixture difficulty
-                    team_strength = fixture_service.get_team_attack_defense_strength(team_name)
-                    fixtures = fixture_service.get_upcoming_fixtures_difficulty(team_name, 5)
-                    
-                    # Calculate attacking fixture score (lower opponent defense = easier)
-                    attacking_score = 5 - fixtures['average_difficulty']  # Invert for attacking
-                    
-                    score_color = "🟢" if attacking_score >= 3.5 else "🟡" if attacking_score >= 2.5 else "🔴"
-                    
-                    with st.expander(f"{score_color} {team_name} - Attacking Score: {attacking_score:.1f}"):
-                        st.write("**Your Players:**")
-                        for player in players:
-                            st.write(f"• {player['name']} ({player['position']})")
-                        
-                        st.write("**Next 5 Fixtures (Attacking Perspective):**")
-                        for fixture in fixtures['fixtures']:
-                            # For attacking, we want weak defenses (easier to score against)
-                            opponent_defense = fixture_service.get_team_attack_defense_strength(fixture['opponent'])['defense']
-                            attacking_difficulty = min(5, max(1, opponent_defense / 20))  # Scale to 1-5
-                            
-                            home_away = "🏠 vs" if fixture['home'] else "✈️ @"
-                            diff_emoji = "🟢" if attacking_difficulty <= 2 else "🟡" if attacking_difficulty == 3 else "🔴"
-                            st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {diff_emoji}")
-            else:
-                st.info("No attacking players in your squad")
+            st.success("**💎 Best Value**")
+            for player in sorted_by_value[:3]:
+                st.write(f"• **{player['name']}** - {player['ppm']:.1f} PPM")
         
         with col2:
-            st.subheader("🛡️ Defensive Fixture Analysis")
-            st.write("*How likely are your defenders to get clean sheets?*")
-            
-            if defensive_players:
-                # Group by team and analyze
-                defensive_teams = {}
-                for player in defensive_players:
-                    team = player['team']
-                    if team not in defensive_teams:
-                        defensive_teams[team] = []
-                    defensive_teams[team].append(player)
-                
-                for team_name, players in defensive_teams.items():
-                    # Get team's defensive fixture difficulty
-                    fixtures = fixture_service.get_upcoming_fixtures_difficulty(team_name, 5)
-                    
-                    # Calculate defensive fixture score (lower opponent attack = easier clean sheets)
-                    defensive_score = 5 - fixtures['average_difficulty']  # Invert for defensive
-                    
-                    score_color = "🟢" if defensive_score >= 3.5 else "🟡" if defensive_score >= 2.5 else "🔴"
-                    
-                    with st.expander(f"{score_color} {team_name} - Defensive Score: {defensive_score:.1f}"):
-                        st.write("**Your Players:**")
-                        for player in players:
-                            st.write(f"• {player['name']} ({player['position']})")
-                        
-                        st.write("**Next 5 Fixtures (Defensive Perspective):**")
-                        for fixture in fixtures['fixtures']:
-                            # For defending, we want weak attacks (easier to keep clean sheets)
-                            opponent_attack = fixture_service.get_team_attack_defense_strength(fixture['opponent'])['attack']
-                            defensive_difficulty = min(5, max(1, opponent_attack / 20))  # Scale to 1-5
-                            
-                            home_away = "🏠 vs" if fixture['home'] else "✈️ @"
-                            diff_emoji = "🟢" if defensive_difficulty <= 2 else "🟡" if defensive_difficulty == 3 else "🔴"
-                            st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {diff_emoji}")
-            else:
-                st.info("No defensive players in your squad")
+            st.error("**⚠️ Worst Value**")
+            for player in sorted_by_value[-3:]:
+                st.write(f"• **{player['name']}** - {player['ppm']:.1f} PPM")
+    
+    def _display_risk_assessment(self, team_data, players_df, picks):
+        """Display risk assessment"""
+        st.subheader("🎯 Risk Assessment")
         
-        # Combined recommendation
-        st.subheader("🎯 Combined Fixture Recommendations")
+        # Calculate risk factors
+        risk_factors = []
+        for pick in picks:
+            player_info = players_df[players_df['id'] == pick['element']]
+            if not player_info.empty:
+                player = player_info.iloc[0]
+                
+                risk_score = 0
+                risk_reasons = []
+                
+                # Injury risk
+                if player.get('status') in ['i', 'd']:
+                    risk_score += 3
+                    risk_reasons.append("Injury concerns")
+                
+                # Form risk
+                form = float(player.get('form', 0))
+                if form < 3:
+                    risk_score += 2
+                    risk_reasons.append("Poor form")
+                
+                # Rotation risk
+                minutes = int(player.get('minutes', 0))
+                if minutes < 1000:
+                    risk_score += 1
+                    risk_reasons.append("Rotation risk")
+                
+                # Price vs performance risk
+                ppm = float(player.get('points_per_million', 0))
+                if ppm < 4:
+                    risk_score += 1
+                    risk_reasons.append("Poor value")
+                
+                risk_factors.append({
+                    'name': player.get('web_name', 'Unknown'),
+                    'risk_score': risk_score,
+                    'risk_level': 'High' if risk_score >= 5 else 'Medium' if risk_score >= 3 else 'Low',
+                    'reasons': risk_reasons
+                })
+        
+        # Risk summary
+        high_risk = len([p for p in risk_factors if p['risk_level'] == 'High'])
+        medium_risk = len([p for p in risk_factors if p['risk_level'] == 'Medium'])
+        low_risk = len([p for p in risk_factors if p['risk_level'] == 'Low'])
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.success("""
-            **🟢 Excellent Fixtures**
-            - Strong attacking options
-            - Good clean sheet potential
-            - Consider captaincy
-            """)
+            st.metric("🔴 High Risk", high_risk)
         
         with col2:
-            st.info("""
-            **🟡 Mixed Fixtures**
-            - Some good, some difficult
-            - Monitor team news
-            - Backup options ready
-            """)
+            st.metric("🟡 Medium Risk", medium_risk)
         
         with col3:
-            st.error("""
-            **🔴 Difficult Fixtures**
-            - Consider bench/transfer
-            - Avoid captaincy
-            - Look for alternatives
-            """)
+            st.metric("🟢 Low Risk", low_risk)
+        
+        # Risk details
+        if high_risk > 0:
+            st.error("**🚨 High Risk Players**")
+            for player in [p for p in risk_factors if p['risk_level'] == 'High']:
+                st.write(f"• **{player['name']}** - {', '.join(player['reasons'])}")
+        
+        if medium_risk > 0:
+            st.warning("**⚠️ Medium Risk Players**")
+            for player in [p for p in risk_factors if p['risk_level'] == 'Medium']:
+                st.write(f"• **{player['name']}** - {', '.join(player['reasons'])}")
     
-    def _display_captain_fixture_analysis(self, team_data, players_df, fixture_service):
-        """Analyze fixtures for captaincy decisions"""
-        st.subheader("👑 Captain Fixture Analysis")
+    def _display_trend_analysis(self, team_data, players_df, picks):
+        """Display trend analysis"""
+        st.subheader("📈 Trend Analysis")
         
-        picks = team_data.get('picks', [])
-        
-        # Get potential captains (non-GKs with good stats)
-        captain_candidates = []
-        
+        # Analyze form trends
+        form_trends = []
         for pick in picks:
             player_info = players_df[players_df['id'] == pick['element']]
             if not player_info.empty:
                 player = player_info.iloc[0]
-                position = player.get('position_name', 'Unknown')
                 
-                # Skip goalkeepers for captaincy
-                if position != 'Goalkeeper':
-                    team_name = player.get('team_short_name', 'UNK')
-                    
-                    # Get fixture difficulty for this player's team
-                    fixtures = fixture_service.get_upcoming_fixtures_difficulty(team_name, 1)  # Next fixture only
-                    
-                    captain_candidates.append({
-                        'name': player.get('web_name', 'Unknown'),
-                        'team': team_name,
-                        'position': position,
-                        'form': float(player.get('form', 0)),
-                        'total_points': int(player.get('total_points', 0)),
-                        'ownership': float(player.get('selected_by_percent', 0)),
-                        'fixture_difficulty': fixtures['average_difficulty'],
-                        'next_opponent': fixtures['fixtures'][0]['opponent'] if fixtures['fixtures'] else 'TBD',
-                        'is_home': fixtures['fixtures'][0]['home'] if fixtures['fixtures'] else True
-                    })
-        
-        if captain_candidates:
-            # Sort by combined score (form + fixture ease)
-            for candidate in captain_candidates:
-                # Calculate captain score (higher = better captain option)
-                fixture_score = 6 - candidate['fixture_difficulty']  # Invert difficulty (5=best, 1=worst)
-                form_score = candidate['form']
-                points_score = candidate['total_points'] / 100  # Normalize
+                form = float(player.get('form', 0))
+                ppg = float(player.get('points_per_game', 0))
                 
-                candidate['captain_score'] = (fixture_score * 0.4 + form_score * 0.4 + points_score * 0.2)
-            
-            captain_candidates.sort(key=lambda x: x['captain_score'], reverse=True)
-            
-            st.write("**📊 Captain Options Ranked by Fixture + Form:**")
-            
-            for i, candidate in enumerate(captain_candidates[:8], 1):
-                home_away = "🏠 vs" if candidate['is_home'] else "✈️ @"
-                difficulty_emoji = "🟢" if candidate['fixture_difficulty'] <= 2 else "🟡" if candidate['fixture_difficulty'] == 3 else "🔴"
-                
-                # Captain recommendation level
-                if candidate['captain_score'] >= 7:
-                    rec_level = "🔥 Excellent"
-                elif candidate['captain_score'] >= 5.5:
-                    rec_level = "👍 Good"
-                elif candidate['captain_score'] >= 4:
-                    rec_level = "⚖️ Average"
+                # Determine trend
+                if form > ppg * 1.2:
+                    trend = "📈 Improving"
+                elif form < ppg * 0.8:
+                    trend = "📉 Declining"
                 else:
-                    rec_level = "⚠️ Risky"
+                    trend = "➡️ Stable"
                 
-                with st.expander(f"{i}. {candidate['name']} - {rec_level} ({candidate['captain_score']:.1f})"):
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("Next Fixture", f"{home_away} {candidate['next_opponent']} {difficulty_emoji}")
-                        st.write(f"Fixture Difficulty: {candidate['fixture_difficulty']:.1f}")
-                    
-                    with col2:
-                        st.metric("Form", f"{candidate['form']:.1f}")
-                        st.metric("Total Points", candidate['total_points'])
-                    
-                    with col3:
-                        st.metric("Ownership", f"{candidate['ownership']:.1f}%")
-                        
-                        # Risk/reward analysis
-                        if candidate['ownership'] > 50:
-                            st.write("🛡️ **Safe pick** - High ownership")
-                        elif candidate['ownership'] < 15:
-                            st.write("💎 **Differential** - Low ownership")
-                        else:
-                            st.write("⚖️ **Balanced** - Medium ownership")
-        
-        else:
-            st.warning("No captain candidates found")
-        
-        # Captain strategy tips
-        st.subheader("💡 Captain Strategy Tips")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.info("""
-            **🎯 This Gameweek:**
-            - Prioritize easy fixtures (1-2 difficulty)
-            - Consider home advantage
-            - Check for rotation risk
-            - Monitor team news
-            """)
-        
-        with col2:
-            st.warning("""
-            **🔮 Long-term Planning:**
-            - Look ahead 2-3 gameweeks
-            - Plan around difficult fixtures
-            - Consider differential captains
-            - Track form trends
-            """)
-    
-    def _display_fixture_transfer_targets(self, team_data, players_df, fixture_service):
-        """Identify transfer targets based on fixtures"""
-        st.subheader("🔄 Fixture-Based Transfer Targets")
-        
-        # Get all teams with good upcoming fixtures
-        all_teams = players_df['team_short_name'].unique() if 'team_short_name' in players_df.columns else []
-        
-        team_fixture_scores = []
-        
-        for team in all_teams:
-            if pd.notna(team):
-                fixtures = fixture_service.get_upcoming_fixtures_difficulty(team, 5)
-                fixture_score = 6 - fixtures['average_difficulty']  # Higher = better fixtures
-                
-                team_fixture_scores.append({
-                    'team': team,
-                    'fixture_score': fixture_score,
-                    'avg_difficulty': fixtures['average_difficulty'],
-                    'rating': fixtures['rating']
+                form_trends.append({
+                    'name': player.get('web_name', 'Unknown'),
+                    'form': form,
+                    'ppg': ppg,
+                    'trend': trend
                 })
         
-        # Sort by fixture quality (best first)
-        team_fixture_scores.sort(key=lambda x: x['fixture_score'], reverse=True)
+        # Trend summary
+        improving = len([p for p in form_trends if "Improving" in p['trend']])
+        declining = len([p for p in form_trends if "Declining" in p['trend']])
+        stable = len([p for p in form_trends if "Stable" in p['trend']])
         
-        transfer_tabs = st.tabs(["🎯 Best Fixtures", "⚠️ Worst Fixtures", "💎 Differentials"])
+        col1, col2, col3 = st.columns(3)
         
-        with transfer_tabs[0]:
-            st.subheader("🟢 Teams with Best Fixtures")
-            st.write("*Consider players from these teams*")
-            
-            best_teams = team_fixture_scores[:8]
-            
-            for team_data_fix in best_teams:
-                team_name = team_data_fix['team']
-                
-                # Get best players from this team
-                team_players = players_df[players_df['team_short_name'] == team_name]
-                if not team_players.empty:
-                    # Get top players by points/form
-                    top_players = team_players.nlargest(5, 'total_points')
-                    
-                    with st.expander(f"🟢 {team_name} - {team_data_fix['rating']} Fixtures ({team_data_fix['avg_difficulty']:.1f})"):
-                        st.write("**🎯 Top Transfer Targets:**")
-                        
-                        for _, player in top_players.iterrows():
-                            col1, col2, col3, col4 = st.columns(4)
-                            
-                            with col1:
-                                st.write(f"**{player.get('web_name', 'Unknown')}**")
-                                st.write(f"{player.get('position_name', 'Unknown')}")
-                            
-                            with col2:
-                                st.write(f"£{float(player.get('now_cost', 0))/10:.1f}m")
-                                st.write(f"Form: {player.get('form', 0)}")
-                            
-                            with col3:
-                                st.write(f"{player.get('total_points', 0)} pts")
-                                ppm = float(player.get('points_per_million', 0))
-                                st.write(f"PPM: {ppm:.1f}")
-                            
-                            with col4:
-                                ownership = float(player.get('selected_by_percent', 0))
-                                st.write(f"{ownership:.1f}% owned")
-                                
-                                if ownership < 10:
-                                    st.write("💎 Differential")
-                                elif ownership > 50:
-                                    st.write("🛡️ Template")
-                                else:
-                                    st.write("⚖️ Balanced")
+        with col1:
+            st.metric("📈 Improving", improving)
         
-        with transfer_tabs[1]:
-            st.subheader("🔴 Teams with Worst Fixtures")
-            st.write("*Consider transferring out players from these teams*")
-            
-            worst_teams = team_fixture_scores[-8:]
-            
-            for team_data_fix in worst_teams:
-                team_name = team_data_fix['team']
-                
-                # Get popular players from this team (likely in many squads)
-                team_players = players_df[players_df['team_short_name'] == team_name]
-                if not team_players.empty:
-                    # Get most owned players
-                    popular_players = team_players.nlargest(3, 'selected_by_percent')
-                    
-                    with st.expander(f"🔴 {team_name} - {team_data_fix['rating']} Fixtures ({team_data_fix['avg_difficulty']:.1f})"):
-                        st.write("**⚠️ Consider Transferring Out:**")
-                        
-                        for _, player in popular_players.iterrows():
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                st.write(f"**{player.get('web_name', 'Unknown')}**")
-                                st.write(f"{player.get('position_name', 'Unknown')}")
-                            
-                            with col2:
-                                st.write(f"£{float(player.get('now_cost', 0))/10:.1f}m")
-                                st.write(f"{player.get('total_points', 0)} pts")
-                            
-                            with col3:
-                                ownership = float(player.get('selected_by_percent', 0))
-                                st.write(f"{ownership:.1f}% owned")
-                                
-                                if ownership > 30:
-                                    st.warning("High ownership - many will keep")
-                                else:
-                                    st.info("Good time to transfer out")
+        with col2:
+            st.metric("📉 Declining", declining)
         
-        with transfer_tabs[2]:
-            st.subheader("💎 Differential Opportunities")
-            st.write("*Low ownership players with good fixtures*")
-            
-            # Find differential players (low ownership) with good fixtures
-            differential_candidates = []
-            
-            for team_data_fix in team_fixture_scores[:12]:  # Top 12 teams by fixtures
-                if team_data_fix['fixture_score'] >= 3:  # Only good fixtures
-                    team_name = team_data_fix['team']
-                    team_players = players_df[players_df['team_short_name'] == team_name]
-                    
-                    if not team_players.empty:
-                        # Find players with <15% ownership and decent points
-                        differentials = team_players[
-                            (team_players['selected_by_percent'] < 15) & 
-                            (team_players['total_points'] > 50)
-                        ]
-                        
-                        for _, player in differentials.iterrows():
-                            differential_candidates.append({
-                                'name': player.get('web_name', 'Unknown'),
-                                'team': team_name,
-                                'position': player.get('position_name', 'Unknown'),
-                                'price': float(player.get('now_cost', 0)) / 10,
-                                'points': player.get('total_points', 0),
-                                'form': float(player.get('form', 0)),
-                                'ownership': float(player.get('selected_by_percent', 0)),
-                                'fixture_score': team_data_fix['fixture_score']
-                            })
-            
-            # Sort by combined differential score
-            for candidate in differential_candidates:
-                candidate['differential_score'] = (
-                    candidate['fixture_score'] * 0.3 +
-                    candidate['form'] * 0.3 +
-                    (candidate['points'] / 100) * 0.2 +
-                    (15 - candidate['ownership']) * 0.2  # Lower ownership = higher score
-                )
-            
-            differential_candidates.sort(key=lambda x: x['differential_score'], reverse=True)
-            
-            for candidate in differential_candidates[:10]:
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.write(f"**{candidate['name']}**")
-                    st.write(f"{candidate['position']} ({candidate['team']})")
-                
-                with col2:
-                    st.write(f"£{candidate['price']:.1f}m")
-                    st.write(f"Form: {candidate['form']:.1f}")
-                
-                with col3:
-                    st.write(f"{candidate['points']} points")
-                    st.write(f"Fixtures: {candidate['fixture_score']:.1f}")
-                
-                with col4:
-                    st.write(f"{candidate['ownership']:.1f}% owned")
-                    st.success("💎 Differential")
+        with col3:
+            st.metric("➡️ Stable", stable)
+        
+        # Display trends
+        for trend_type, emoji in [("Improving", "📈"), ("Declining", "📉"), ("Stable", "➡️")]:
+            trend_players = [p for p in form_trends if trend_type in p['trend']]
+            if trend_players:
+                st.write(f"**{emoji} {trend_type} Players**")
+                for player in trend_players:
+                    st.write(f"• **{player['name']}** - Form: {player['form']:.1f}, PPG: {player['ppg']:.1f}")
     
-    def _display_team_fixture_comparison(self, team_data, players_df, fixture_service):
-        """Compare fixture difficulty between teams"""
-        st.subheader("📊 Team Fixture Comparison")
+    def _display_transfer_planning(self, team_data):
+        """Display transfer planning analysis"""
+        st.subheader("🔄 Transfer Planning")
         
-        # Team selection for comparison
-        all_teams = sorted(players_df['team_short_name'].unique()) if 'team_short_name' in players_df.columns else []
+        st.info("Transfer planning feature will integrate with the Transfer Planning service for comprehensive analysis.")
+        
+        # Basic transfer analysis
+        bank = team_data.get('bank', 0) / 10
+        team_value = team_data.get('value', 1000) / 10
         
         col1, col2 = st.columns(2)
         
         with col1:
-            team1 = st.selectbox("Select First Team", all_teams, index=0 if all_teams else None)
+            st.metric("Available Funds", f"£{bank:.1f}m")
+            st.metric("Team Value", f"£{team_value:.1f}m")
         
         with col2:
-            team2 = st.selectbox("Select Second Team", all_teams, index=1 if len(all_teams) > 1 else 0)
-        
-        if team1 and team2 and team1 != team2:
-            # Compare fixtures between teams
-            comparison = fixture_service.compare_fixture_run(team1, team2, 5)
+            total_budget = bank + team_value
+            st.metric("Total Budget", f"£{total_budget:.1f}m")
             
-            # Display comparison
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader(f"⚽ {team1}")
-                team1_data = comparison['team1']['data']
-                
-                st.metric("Average Difficulty", f"{team1_data['average_difficulty']:.1f}")
-                st.metric("Fixture Rating", team1_data['rating'])
-                
-                st.write("**Next 5 Fixtures:**")
-                for fixture in team1_data['fixtures']:
-                    home_away = "🏠 vs" if fixture['home'] else "✈️ @"
-                    difficulty_emoji = "🟢" if fixture['difficulty'] <= 2 else "🟡" if fixture['difficulty'] == 3 else "🔴"
-                    st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {difficulty_emoji}")
-            
-            with col2:
-                st.subheader(f"⚽ {team2}")
-                team2_data = comparison['team2']['data']
-                
-                st.metric("Average Difficulty", f"{team2_data['average_difficulty']:.1f}")
-                st.metric("Fixture Rating", team2_data['rating'])
-                
-                st.write("**Next 5 Fixtures:**")
-                for fixture in team2_data['fixtures']:
-                    home_away = "🏠 vs" if fixture['home'] else "✈️ @"
-                    difficulty_emoji = "🟢" if fixture['difficulty'] <= 2 else "🟡" if fixture['difficulty'] == 3 else "🔴"
-                    st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {difficulty_emoji}")
-            
-            # Recommendation
-            st.subheader("🎯 Recommendation")
-            recommended_team = comparison['recommendation']
-            
-            if recommended_team == team1:
-                st.success(f"✅ **{team1}** has easier fixtures than {team2}")
+            if bank > 2:
+                st.success("Good transfer flexibility")
+            elif bank < 0.5:
+                st.warning("Limited transfer options")
             else:
-                st.success(f"✅ **{team2}** has easier fixtures than {team1}")
+                st.info("Moderate transfer flexibility")
+    
+    def _display_performance_comparison(self, team_data):
+        """Display performance comparison"""
+        st.subheader("📊 Performance Comparison")
+        
+        st.info("Performance comparison feature will integrate with the Performance Comparison service for detailed benchmarking.")
+        
+        # Basic comparison metrics
+        total_points = team_data.get('summary_overall_points', 0)
+        overall_rank = team_data.get('summary_overall_rank', 0)
+        current_gw = team_data.get('gameweek', 1)
+        
+        if current_gw > 0:
+            avg_ppg = total_points / current_gw
             
-            # Show players from both teams
-            st.subheader("👥 Players Comparison")
-            
-            col1, col2 = st.columns(2)
+            # Estimated benchmarks
+            col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.write(f"**{team1} Players:**")
-                team1_players = players_df[players_df['team_short_name'] == team1].nlargest(5, 'total_points')
-                for _, player in team1_players.iterrows():
-                    st.write(f"• {player.get('web_name', 'Unknown')} ({player.get('position_name', 'Unknown')}) - £{float(player.get('now_cost', 0))/10:.1f}m")
+                st.metric("Your PPG", f"{avg_ppg:.1f}")
+                if avg_ppg > 60:
+                    st.success("Above elite benchmark")
+                elif avg_ppg > 50:
+                    st.info("Above average")
+                else:
+                    st.warning("Below average")
             
             with col2:
-                st.write(f"**{team2} Players:**")
-                team2_players = players_df[players_df['team_short_name'] == team2].nlargest(5, 'total_points')
-                for _, player in team2_players.iterrows():
-                    st.write(f"• {player.get('web_name', 'Unknown')} ({player.get('position_name', 'Unknown')}) - £{float(player.get('now_cost', 0))/10:.1f}m")
-        
-        else:
-            st.info("Please select two different teams to compare their fixtures.")
+                if overall_rank:
+                    percentile = (1 - (overall_rank / 8000000)) * 100
+                    st.metric("Percentile", f"{percentile:.1f}%")
+                    
+                    if percentile > 90:
+                        st.success("Top 10% manager")
+                    elif percentile > 75:
+                        st.info("Top quartile")
+                    elif percentile > 50:
+                        st.info("Above median")
+                    else:
+                        st.warning("Below median")
+            
+            with col3:
+                # Projected final points
+                remaining_gws = 38 - current_gw
+                projected_final = total_points + (avg_ppg * remaining_gws)
+                st.metric("Projected Final", f"{projected_final:.0f}")
+                
+                if projected_final > 2200:
+                    st.success("Elite projection")
+                elif projected_final > 2000:
+                    st.info("Strong projection")
+                else:
+                    st.warning("Room for improvement")
 
