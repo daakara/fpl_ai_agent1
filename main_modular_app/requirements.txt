@@ -40,7 +40,6 @@ asyncio-mqtt>=0.13.0
 
 # Optional: Database Support
 sqlalchemy>=2.0.0
-sqlite3  # Built-in with Python
 
 # Development and Testing
 pytest>=7.4.0
