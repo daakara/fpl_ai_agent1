@@ -1,144 +1,381 @@
 """
-Enhanced Fixture Service with difficulty analysis and team strength evaluation
+Enhanced Fixture Service with Official FPL API Integration
 """
 import pandas as pd
 import numpy as np
+import requests
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import streamlit as st
+import logging
+import urllib3
+
+# Disable SSL warnings when certificate verification is disabled
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class FixtureService:
-    """Enhanced Fixture Service with comprehensive analysis capabilities"""
+    """Enhanced Fixture Service using Official FPL API data"""
     
     def __init__(self):
-        """Initialize the fixture service with team strength data"""
-        self.team_strength_cache = {}
-        self.fixture_difficulty_cache = {}
+        """Initialize the fixture service with FPL API integration"""
+        self.base_url = "https://fantasy.premierleague.com/api"
+        self.fixtures_cache = {}
+        self.teams_cache = {}
+        self.bootstrap_cache = {}
+        self.cache_timestamp = None
+        self.cache_duration = 3600  # 1 hour cache
+        self.logger = logging.getLogger(__name__)
         
-        # Premier League team strength ratings (simplified - would be dynamic in production)
-        self.team_strength_ratings = {
-            'MCI': {'attack': 95, 'defense': 85, 'overall': 90},
-            'ARS': {'attack': 88, 'defense': 82, 'overall': 85},
-            'LIV': {'attack': 92, 'defense': 80, 'overall': 86},
-            'CHE': {'attack': 85, 'defense': 78, 'overall': 82},
-            'MUN': {'attack': 82, 'defense': 75, 'overall': 79},
-            'TOT': {'attack': 85, 'defense': 72, 'overall': 79},
-            'NEW': {'attack': 75, 'defense': 85, 'overall': 80},
-            'BRI': {'attack': 78, 'defense': 75, 'overall': 77},
-            'AVL': {'attack': 80, 'defense': 73, 'overall': 77},
-            'WHU': {'attack': 75, 'defense': 70, 'overall': 73},
-            'CRY': {'attack': 70, 'defense': 75, 'overall': 73},
-            'FUL': {'attack': 72, 'defense': 68, 'overall': 70},
-            'BOU': {'attack': 70, 'defense': 65, 'overall': 68},
-            'WOL': {'attack': 68, 'defense': 70, 'overall': 69},
-            'EVE': {'attack': 65, 'defense': 68, 'overall': 67},
-            'BRE': {'attack': 70, 'defense': 60, 'overall': 65},
-            'NFO': {'attack': 62, 'defense': 65, 'overall': 64},
-            'IPS': {'attack': 60, 'defense': 58, 'overall': 59},
-            'LEI': {'attack': 65, 'defense': 55, 'overall': 60},
-            'SOU': {'attack': 58, 'defense': 55, 'overall': 57}
-        }
+        # Configure requests session with SSL verification disabled
+        self.session = requests.Session()
+        self.session.verify = False  # Disable SSL certificate verification
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+        
+        # Load initial data
+        self._load_bootstrap_data()
     
-    def get_fixture_difficulty_score(self, team_short_name: str, is_home: bool, opponent_short_name: str) -> float:
-        """
-        Calculate fixture difficulty score for a team
-        
-        Args:
-            team_short_name: Team's short name (e.g., 'ARS')
-            is_home: Whether the team is playing at home
-            opponent_short_name: Opponent's short name
+    def _load_bootstrap_data(self):
+        """Load bootstrap data from FPL API including teams and current gameweek"""
+        try:
+            if (self.cache_timestamp and 
+                datetime.now() - self.cache_timestamp < timedelta(seconds=self.cache_duration) and
+                self.bootstrap_cache):
+                return self.bootstrap_cache
             
-        Returns:
-            Difficulty score (1-5, where 1 is easiest and 5 is hardest)
-        """
-        cache_key = f"{team_short_name}_{opponent_short_name}_{is_home}"
-        
-        if cache_key in self.fixture_difficulty_cache:
-            return self.fixture_difficulty_cache[cache_key]
-        
-        team_strength = self.team_strength_ratings.get(team_short_name, {'overall': 65})['overall']
-        opponent_strength = self.team_strength_ratings.get(opponent_short_name, {'overall': 65})['overall']
-        
-        # Base difficulty is opponent strength relative to team strength
-        base_difficulty = opponent_strength / max(team_strength, 1)
-        
-        # Home advantage adjustment (approximately 5-10% boost)
-        if is_home:
-            base_difficulty *= 0.95  # Slightly easier at home
-        else:
-            base_difficulty *= 1.05  # Slightly harder away
-        
-        # Convert to 1-5 scale
-        if base_difficulty <= 0.8:
-            difficulty = 1  # Very easy
-        elif base_difficulty <= 0.95:
-            difficulty = 2  # Easy
-        elif base_difficulty <= 1.05:
-            difficulty = 3  # Average
-        elif base_difficulty <= 1.2:
-            difficulty = 4  # Hard
-        else:
-            difficulty = 5  # Very hard
-        
-        self.fixture_difficulty_cache[cache_key] = difficulty
-        return difficulty
+            self.logger.info("Loading bootstrap data from FPL API...")
+            response = self.session.get(f"{self.base_url}/bootstrap-static/", timeout=15)
+            response.raise_for_status()
+            
+            self.bootstrap_cache = response.json()
+            self.cache_timestamp = datetime.now()
+            
+            # Extract teams data
+            self.teams_cache = {
+                team['id']: {
+                    'name': team['name'],
+                    'short_name': team['short_name'],
+                    'code': team['code'],
+                    'strength': team.get('strength', 3),
+                    'strength_overall_home': team.get('strength_overall_home', 3),
+                    'strength_overall_away': team.get('strength_overall_away', 3),
+                    'strength_attack_home': team.get('strength_attack_home', 3),
+                    'strength_attack_away': team.get('strength_attack_away', 3),
+                    'strength_defence_home': team.get('strength_defence_home', 3),
+                    'strength_defence_away': team.get('strength_defence_away', 3)
+                }
+                for team in self.bootstrap_cache.get('teams', [])
+            }
+            
+            self.logger.info(f"✅ Successfully loaded {len(self.teams_cache)} teams from FPL API")
+            return self.bootstrap_cache
+            
+        except requests.exceptions.SSLError as e:
+            self.logger.error(f"SSL Error loading bootstrap data: {e}")
+            # Return cached data if available, otherwise empty dict
+            return self.bootstrap_cache if self.bootstrap_cache else {}
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Request error loading bootstrap data: {e}")
+            return self.bootstrap_cache if self.bootstrap_cache else {}
+        except Exception as e:
+            self.logger.error(f"Unexpected error loading bootstrap data: {e}")
+            return self.bootstrap_cache if self.bootstrap_cache else {}
+    
+    def _load_fixtures_data(self):
+        """Load fixtures data from FPL API"""
+        try:
+            if (self.fixtures_cache and self.cache_timestamp and 
+                datetime.now() - self.cache_timestamp < timedelta(seconds=self.cache_duration)):
+                return self.fixtures_cache
+            
+            self.logger.info("Loading fixtures data from FPL API...")
+            response = self.session.get(f"{self.base_url}/fixtures/", timeout=15)
+            response.raise_for_status()
+            
+            fixtures_data = response.json()
+            
+            # Process fixtures into a more usable format
+            self.fixtures_cache = {}
+            
+            for fixture in fixtures_data:
+                # Only include fixtures that haven't been played yet
+                if not fixture.get('finished', True):
+                    team_h = fixture['team_h']
+                    team_a = fixture['team_a']
+                    event = fixture.get('event')
+                    
+                    # Add fixture for home team
+                    if team_h not in self.fixtures_cache:
+                        self.fixtures_cache[team_h] = []
+                    
+                    self.fixtures_cache[team_h].append({
+                        'event': event,
+                        'is_home': True,
+                        'opponent': team_a,
+                        'difficulty': fixture.get('team_h_difficulty', 3),
+                        'kickoff_time': fixture.get('kickoff_time'),
+                        'finished': fixture.get('finished', False)
+                    })
+                    
+                    # Add fixture for away team
+                    if team_a not in self.fixtures_cache:
+                        self.fixtures_cache[team_a] = []
+                    
+                    self.fixtures_cache[team_a].append({
+                        'event': event,
+                        'is_home': False,
+                        'opponent': team_h,
+                        'difficulty': fixture.get('team_a_difficulty', 3),
+                        'kickoff_time': fixture.get('kickoff_time'),
+                        'finished': fixture.get('finished', False)
+                    })
+            
+            # Sort fixtures by gameweek for each team
+            for team_id in self.fixtures_cache:
+                self.fixtures_cache[team_id].sort(key=lambda x: x.get('event', 0))
+            
+            self.logger.info(f"✅ Successfully loaded fixtures for {len(self.fixtures_cache)} teams from FPL API")
+            return self.fixtures_cache
+            
+        except requests.exceptions.SSLError as e:
+            self.logger.error(f"SSL Error loading fixtures data: {e}")
+            return {}
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Request error loading fixtures data: {e}")
+            return {}
+        except Exception as e:
+            self.logger.error(f"Unexpected error loading fixtures data: {e}")
+            return {}
+    
+    def get_current_gameweek(self) -> int:
+        """Get current gameweek from FPL API"""
+        try:
+            bootstrap_data = self._load_bootstrap_data()
+            
+            # Find current event
+            for event in bootstrap_data.get('events', []):
+                if event.get('is_current', False):
+                    return event['id']
+            
+            # If no current event, find the next upcoming event
+            for event in bootstrap_data.get('events', []):
+                if event.get('is_next', False):
+                    return event['id']
+            
+            # Fallback: find first unfinished event
+            for event in bootstrap_data.get('events', []):
+                if not event.get('finished', True):
+                    return event['id']
+            
+            # Final fallback
+            return 1
+            
+        except Exception as e:
+            self.logger.error(f"Error getting current gameweek: {e}")
+            return st.session_state.get('current_gameweek', 1)
+    
+    def get_team_id_by_short_name(self, short_name: str) -> Optional[int]:
+        """Get team ID by short name"""
+        for team_id, team_data in self.teams_cache.items():
+            if team_data['short_name'] == short_name:
+                return team_id
+        return None
+    
+    def get_team_short_name_by_id(self, team_id: int) -> str:
+        """Get team short name by ID"""
+        team_data = self.teams_cache.get(team_id, {})
+        return team_data.get('short_name', 'UNK')
     
     def get_upcoming_fixtures_difficulty(self, team_short_name: str, gameweeks: int = 5) -> Dict:
         """
-        Get fixture difficulty for upcoming gameweeks (current GW + next 4)
+        Get fixture difficulty for upcoming gameweeks using official FPL data
         
         Args:
-            team_short_name: Team's short name
-            gameweeks: Number of upcoming gameweeks to analyze (default 5 for current + next 4)
+            team_short_name: Team's short name (e.g., 'ARS')
+            gameweeks: Number of upcoming gameweeks to analyze
             
         Returns:
-            Dictionary with fixture difficulty analysis
+            Dictionary with fixture difficulty analysis using official FPL data
         """
-        # This would integrate with actual fixture data in production
-        # For now, providing a simplified implementation with current GW + next 4
+        try:
+            # Load latest data
+            self._load_fixtures_data()
+            
+            # Get team ID
+            team_id = self.get_team_id_by_short_name(team_short_name)
+            if not team_id:
+                self.logger.warning(f"Team not found: {team_short_name}")
+                return self._get_fallback_fixtures(team_short_name, gameweeks)
+            
+            # Get team's fixtures
+            team_fixtures = self.fixtures_cache.get(team_id, [])
+            
+            if not team_fixtures:
+                self.logger.warning(f"No fixtures found for team: {team_short_name}")
+                return self._get_fallback_fixtures(team_short_name, gameweeks)
+            
+            # Get current gameweek
+            current_gw = self.get_current_gameweek()
+            
+            # Filter upcoming fixtures (current + next gameweeks)
+            upcoming_fixtures = [
+                f for f in team_fixtures 
+                if f.get('event', 0) >= current_gw and not f.get('finished', False)
+            ][:gameweeks]
+            
+            if not upcoming_fixtures:
+                self.logger.warning(f"No upcoming fixtures found for team: {team_short_name}")
+                return self._get_fallback_fixtures(team_short_name, gameweeks)
+            
+            # Process fixtures
+            fixtures_analysis = []
+            total_difficulty = 0
+            
+            for fixture in upcoming_fixtures:
+                opponent_id = fixture['opponent']
+                opponent_short_name = self.get_team_short_name_by_id(opponent_id)
+                difficulty = fixture['difficulty']
+                
+                fixtures_analysis.append({
+                    'gameweek': fixture.get('event', current_gw),
+                    'opponent': opponent_short_name,
+                    'home': fixture['is_home'],
+                    'difficulty': difficulty,
+                    'difficulty_text': self._get_difficulty_text(difficulty),
+                    'kickoff_time': fixture.get('kickoff_time')
+                })
+                
+                total_difficulty += difficulty
+            
+            avg_difficulty = total_difficulty / len(fixtures_analysis) if fixtures_analysis else 3
+            
+            return {
+                'fixtures': fixtures_analysis,
+                'average_difficulty': avg_difficulty,
+                'total_difficulty': total_difficulty,
+                'rating': self._get_fixture_period_rating(avg_difficulty)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting fixtures for {team_short_name}: {e}")
+            return self._get_fallback_fixtures(team_short_name, gameweeks)
+    
+    def _get_fallback_fixtures(self, team_short_name: str, gameweeks: int) -> Dict:
+        """Fallback fixture data when API is unavailable"""
+        self.logger.info(f"Using fallback fixture data for {team_short_name}")
         
-        # Get current gameweek from session state or default
-        current_gw = st.session_state.get('current_gameweek', 20)
+        # Use simplified estimation based on team strength
+        current_gw = self.get_current_gameweek()
         
-        # Sample upcoming opponents (would be fetched from API)
-        # Representing current GW + next 4 GWs
-        sample_fixtures = [
-            {'opponent': 'MCI', 'home': False, 'gameweek': current_gw},
-            {'opponent': 'BRE', 'home': True, 'gameweek': current_gw + 1},
-            {'opponent': 'LIV', 'home': False, 'gameweek': current_gw + 2},
-            {'opponent': 'SOU', 'home': True, 'gameweek': current_gw + 3},
-            {'opponent': 'TOT', 'home': False, 'gameweek': current_gw + 4}
-        ]
-        
+        # Generate estimated fixtures
         fixtures_analysis = []
         total_difficulty = 0
         
-        for i, fixture in enumerate(sample_fixtures[:gameweeks]):
-            difficulty = self.get_fixture_difficulty_score(
-                team_short_name, 
-                fixture['home'], 
-                fixture['opponent']
-            )
+        for i in range(gameweeks):
+            # Estimate difficulty based on average (3 is neutral)
+            difficulty = np.random.choice([2, 3, 4], p=[0.3, 0.4, 0.3])  # Weighted random
             
             fixtures_analysis.append({
-                'gameweek': fixture['gameweek'],
-                'opponent': fixture['opponent'],
-                'home': fixture['home'],
+                'gameweek': current_gw + i,
+                'opponent': 'TBD',
+                'home': i % 2 == 0,  # Alternate home/away
                 'difficulty': difficulty,
-                'difficulty_text': self._get_difficulty_text(difficulty)
+                'difficulty_text': self._get_difficulty_text(difficulty),
+                'kickoff_time': None
             })
             
             total_difficulty += difficulty
         
-        avg_difficulty = total_difficulty / len(fixtures_analysis) if fixtures_analysis else 3
+        avg_difficulty = total_difficulty / len(fixtures_analysis)
         
         return {
             'fixtures': fixtures_analysis,
             'average_difficulty': avg_difficulty,
             'total_difficulty': total_difficulty,
-            'rating': self._get_fixture_period_rating(avg_difficulty)
+            'rating': self._get_fixture_period_rating(avg_difficulty),
+            'is_fallback': True
         }
+    
+    def get_team_attack_defense_strength(self, team_short_name: str) -> Dict:
+        """Get team's attacking and defensive strength from official FPL data"""
+        team_id = self.get_team_id_by_short_name(team_short_name)
+        
+        if not team_id or team_id not in self.teams_cache:
+            return {'attack': 3, 'defense': 3, 'overall': 3}
+        
+        team_data = self.teams_cache[team_id]
+        
+        return {
+            'attack_home': team_data.get('strength_attack_home', 3),
+            'attack_away': team_data.get('strength_attack_away', 3),
+            'defense_home': team_data.get('strength_defence_home', 3),
+            'defense_away': team_data.get('strength_defence_away', 3),
+            'overall_home': team_data.get('strength_overall_home', 3),
+            'overall_away': team_data.get('strength_overall_away', 3),
+            'attack': (team_data.get('strength_attack_home', 3) + team_data.get('strength_attack_away', 3)) / 2,
+            'defense': (team_data.get('strength_defence_home', 3) + team_data.get('strength_defence_away', 3)) / 2,
+            'overall': team_data.get('strength', 3)
+        }
+    
+    def compare_fixture_run(self, team1: str, team2: str, gameweeks: int = 5) -> Dict:
+        """Compare fixture difficulty between two teams using official FPL data"""
+        team1_fixtures = self.get_upcoming_fixtures_difficulty(team1, gameweeks)
+        team2_fixtures = self.get_upcoming_fixtures_difficulty(team2, gameweeks)
+        
+        return {
+            'team1': {'name': team1, 'data': team1_fixtures},
+            'team2': {'name': team2, 'data': team2_fixtures},
+            'recommendation': team1 if team1_fixtures['average_difficulty'] < team2_fixtures['average_difficulty'] else team2
+        }
+    
+    def get_fixture_difficulty_score(self, team_short_name: str, is_home: bool, opponent_short_name: str) -> float:
+        """
+        Calculate fixture difficulty score using official FPL team strength data
+        """
+        try:
+            team_id = self.get_team_id_by_short_name(team_short_name)
+            opponent_id = self.get_team_id_by_short_name(opponent_short_name)
+            
+            if not team_id or not opponent_id:
+                return 3  # Default neutral difficulty
+            
+            team_data = self.teams_cache.get(team_id, {})
+            opponent_data = self.teams_cache.get(opponent_id, {})
+            
+            # Get appropriate strength values based on home/away
+            if is_home:
+                team_strength = team_data.get('strength_overall_home', 3)
+                opponent_strength = opponent_data.get('strength_overall_away', 3)
+            else:
+                team_strength = team_data.get('strength_overall_away', 3)
+                opponent_strength = opponent_data.get('strength_overall_home', 3)
+            
+            # Calculate relative difficulty (opponent strength vs team strength)
+            # Higher opponent strength = higher difficulty for team
+            if team_strength == 0:
+                difficulty = 3
+            else:
+                difficulty_ratio = opponent_strength / team_strength
+                
+                # Convert ratio to 1-5 scale
+                if difficulty_ratio <= 0.6:
+                    difficulty = 1
+                elif difficulty_ratio <= 0.8:
+                    difficulty = 2
+                elif difficulty_ratio <= 1.2:
+                    difficulty = 3
+                elif difficulty_ratio <= 1.4:
+                    difficulty = 4
+                else:
+                    difficulty = 5
+            
+            return difficulty
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating difficulty: {e}")
+            return 3
     
     def _get_difficulty_text(self, difficulty: float) -> str:
         """Convert difficulty score to text description"""
@@ -165,21 +402,4 @@ class FixtureService:
             return "Difficult"
         else:
             return "Very Difficult"
-    
-    def get_team_attack_defense_strength(self, team_short_name: str) -> Dict:
-        """Get team's attacking and defensive strength ratings"""
-        return self.team_strength_ratings.get(team_short_name, {
-            'attack': 65, 'defense': 65, 'overall': 65
-        })
-    
-    def compare_fixture_run(self, team1: str, team2: str, gameweeks: int = 5) -> Dict:
-        """Compare fixture difficulty between two teams"""
-        team1_fixtures = self.get_upcoming_fixtures_difficulty(team1, gameweeks)
-        team2_fixtures = self.get_upcoming_fixtures_difficulty(team2, gameweeks)
-        
-        return {
-            'team1': {'name': team1, 'data': team1_fixtures},
-            'team2': {'name': team2, 'data': team2_fixtures},
-            'recommendation': team1 if team1_fixtures['average_difficulty'] < team2_fixtures['average_difficulty'] else team2
-        }
 

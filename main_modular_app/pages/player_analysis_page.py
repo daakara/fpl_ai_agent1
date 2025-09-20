@@ -1368,7 +1368,7 @@ class PlayerAnalysisPage:
                         with col2:
                             st.write(f"**Form:** {player.get('form', 0):.1f}")
                             st.write(f"**PPM:** {player.get('points_per_million', 0):.1f}")
-                            st.write(f"**Ownership:** {player.get('selected_by_percent', 0):.1f}%")
+                            st.write(f"**Ownership:** {player['selected_by_percent']:.1f}%")
                             st.write(f"**Minutes:** {player.get('minutes', 0)}")
                         
                         # AI reasoning
@@ -1420,33 +1420,281 @@ class PlayerAnalysisPage:
         with ai_tab3:
             st.write("**💎 Hidden Gems Discovery**")
             
-            # Find hidden gems: low ownership, good performance
+            # Enhanced Hidden Gems algorithm with more flexible criteria
             if 'selected_by_percent' in display_df.columns and 'total_points' in display_df.columns:
-                hidden_gems = display_df[
-                    (display_df['selected_by_percent'] < 10) &
-                    (display_df['total_points'] > 30)
+                
+                # Create more flexible hidden gems criteria
+                gems_df = display_df.copy()
+                
+                # Calculate minimum points threshold based on data distribution
+                min_points_threshold = max(20, gems_df['total_points'].quantile(0.3))  # At least 30th percentile or 20 points
+                max_ownership_threshold = 15  # Less than 15% owned
+                
+                # First pass - standard hidden gems
+                standard_gems = gems_df[
+                    (gems_df['selected_by_percent'] < max_ownership_threshold) &
+                    (gems_df['total_points'] > min_points_threshold)
                 ].copy()
                 
-                if not hidden_gems.empty:
-                    # Calculate gem score
-                    hidden_gems['gem_score'] = (
-                        (hidden_gems.get('points_per_million', 0) / hidden_gems.get('points_per_million', 1).max()) * 0.4 +
-                        (hidden_gems.get('form', 0) / 10) * 0.3 +
-                        ((10 - hidden_gems['selected_by_percent']) / 10) * 0.3
-                    )
+                # Second pass - emerging gems (slightly higher ownership but great value)
+                emerging_gems = gems_df[
+                    (gems_df['selected_by_percent'] >= max_ownership_threshold) &
+                    (gems_df['selected_by_percent'] < 25) &
+                    (gems_df['total_points'] > min_points_threshold) &
+                    (gems_df.get('points_per_million', 0) > gems_df.get('points_per_million', 0).quantile(0.7))
+                ].copy()
+                
+                # Third pass - form gems (players in great recent form regardless of season total)
+                form_gems = pd.DataFrame()
+                if 'form' in gems_df.columns:
+                    form_gems = gems_df[
+                        (gems_df['selected_by_percent'] < 20) &
+                        (gems_df['form'] > 6) &
+                        (gems_df['total_points'] > 15)  # Lower threshold for form gems
+                    ].copy()
+                
+                # Combine all gem types
+                all_gems = pd.concat([standard_gems, emerging_gems, form_gems]).drop_duplicates()
+                
+                if not all_gems.empty:
+                    # Enhanced gem scoring algorithm
+                    all_gems['gem_score'] = 0
                     
-                    top_gems = hidden_gems.nlargest(5, 'gem_score')
+                    # Points per million component (30%)
+                    if 'points_per_million' in all_gems.columns:
+                        max_ppm = all_gems['points_per_million'].max()
+                        if max_ppm > 0:
+                            all_gems['gem_score'] += (all_gems['points_per_million'] / max_ppm) * 0.3
                     
+                    # Form component (25%)
+                    if 'form' in all_gems.columns:
+                        all_gems['gem_score'] += (all_gems['form'] / 10) * 0.25
+                    
+                    # Ownership differential component (20%)
+                    all_gems['gem_score'] += ((25 - all_gems['selected_by_percent']) / 25) * 0.2
+                    
+                    # Total points component (15%)
+                    max_points = all_gems['total_points'].max()
+                    if max_points > 0:
+                        all_gems['gem_score'] += (all_gems['total_points'] / max_points) * 0.15
+                    
+                    # Minutes reliability component (10%)
+                    if 'minutes' in all_gems.columns:
+                        max_minutes = all_gems['minutes'].max()
+                        if max_minutes > 0:
+                            all_gems['gem_score'] += (all_gems['minutes'] / max_minutes) * 0.1
+                    
+                    # Sort by gem score and display results
+                    top_gems = all_gems.nlargest(min(10, len(all_gems)), 'gem_score')
+                    
+                    st.success(f"🎉 **Found {len(top_gems)} Hidden Gems!**")
+                    
+                    # Display criteria used
+                    with st.expander("🔍 **Hidden Gems Criteria Used**", expanded=False):
+                        st.write(f"""
+                        **Search Criteria:**
+                        - **Standard Gems**: <{max_ownership_threshold}% owned, >{min_points_threshold:.0f} points
+                        - **Emerging Gems**: {max_ownership_threshold}-25% owned, top 30% value
+                        - **Form Gems**: <20% owned, >6.0 form, >15 points
+                        
+                        **Scoring Weights:**
+                        - Points per Million: 30%
+                        - Recent Form: 25%
+                        - Low Ownership: 20%
+                        - Total Points: 15%
+                        - Playing Time: 10%
+                        """)
+                    
+                    # Display gems in organized categories
                     for i, (_, player) in enumerate(top_gems.iterrows(), 1):
-                        st.write(f"**{i}. {player['web_name']}** ({player.get('position_name', 'N/A')})")
-                        st.write(f"💎 Gem Score: {player['gem_score']:.3f} | "
-                                f"👥 {player['selected_by_percent']:.1f}% owned | "
-                                f"📊 {player['total_points']} pts")
-                        st.divider()
+                        # Determine gem category
+                        ownership = player['selected_by_percent']
+                        form = player.get('form', 0)
+                        points = player['total_points']
+                        
+                        if ownership < max_ownership_threshold and points > min_points_threshold:
+                            gem_type = "💎 **Standard Gem**"
+                            gem_color = "🟢"
+                        elif ownership < 25 and player.get('points_per_million', 0) > gems_df.get('points_per_million', 0).quantile(0.7):
+                            gem_type = "⭐ **Emerging Gem**"
+                            gem_color = "🟡"
+                        elif form > 6:
+                            gem_type = "🔥 **Form Gem**"
+                            gem_color = "🔴"
+                        else:
+                            gem_type = "💎 **Hidden Gem**"
+                            gem_color = "🟢"
+                        
+                        with st.expander(f"{gem_color} {i}. **{player['web_name']}** - Gem Score: {player['gem_score']:.3f}"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.write(f"**Type:** {gem_type}")
+                                st.write(f"**Position:** {player.get('position_name', 'N/A')}")
+                                st.write(f"**Team:** {player.get('team_short_name', 'N/A')}")
+                                st.write(f"**Price:** £{player.get('cost_millions', 0):.1f}m")
+                            
+                            with col2:
+                                st.write(f"**Total Points:** {player['total_points']}")
+                                st.write(f"**Ownership:** {player['selected_by_percent']:.1f}%")
+                                st.write(f"**Form:** {player.get('form', 0):.1f}")
+                                st.write(f"**PPM:** {player.get('points_per_million', 0):.1f}")
+                            
+                            # Gem insights
+                            insights = []
+                            
+                            if ownership < 5:
+                                insights.append("🔹 **Ultra-low ownership** - Massive differential potential")
+                            elif ownership < 10:
+                                insights.append("🔹 **Very low ownership** - Great differential")
+                            elif ownership < 15:
+                                insights.append("🔹 **Low ownership** - Good differential option")
+                            
+                            if form > 7:
+                                insights.append("🔹 **Excellent form** - Hot streak player")
+                            elif form > 5:
+                                insights.append("🔹 **Good form** - Consistent recent performances")
+                            
+                            if player.get('points_per_million', 0) > 8:
+                                insights.append("🔹 **Outstanding value** - Best budget option")
+                            elif player.get('points_per_million', 0) > 6:
+                                insights.append("🔹 **Great value** - Excellent budget choice")
+                            
+                            # Minutes reliability
+                            minutes = player.get('minutes', 0)
+                            if minutes > 1500:
+                                insights.append("🔹 **High playing time** - Reliable starter")
+                            elif minutes > 1000:
+                                insights.append("🔹 **Regular starter** - Good minutes")
+                            
+                            if insights:
+                                st.write("**💡 Why this is a gem:**")
+                                for insight in insights:
+                                    st.write(insight)
+                            
+                            # Transfer recommendation
+                            if player['gem_score'] > 0.6:
+                                st.success("🎯 **Strong Transfer Target** - Excellent hidden gem")
+                            elif player['gem_score'] > 0.4:
+                                st.info("📋 **Consider for Watchlist** - Good potential")
+                            else:
+                                st.write("👀 **Monitor** - Keep an eye on performances")
+                
+                # Additional insights section
+                st.subheader("📊 Hidden Gems Market Analysis")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    # Count gems by position
+                    if not all_gems.empty and 'position_name' in all_gems.columns:
+                        gems_by_position = all_gems['position_name'].value_counts()
+                        st.write("**💎 Gems by Position:**")
+                        for pos, count in gems_by_position.items():
+                            st.write(f"• {pos}: {count}")
+                    else:
+                        st.write("**💎 Gems by Position:**")
+                        st.write("Position data not available")
+                
+                with col2:
+                    # Price range analysis
+                    if not all_gems.empty and 'cost_millions' in all_gems.columns:
+                        avg_price = all_gems['cost_millions'].mean()
+                        min_price = all_gems['cost_millions'].min()
+                        max_price = all_gems['cost_millions'].max()
+                        
+                        st.write("**💰 Price Analysis:**")
+                        st.write(f"• Average: £{avg_price:.1f}m")
+                        st.write(f"• Range: £{min_price:.1f}m - £{max_price:.1f}m")
+                        st.write(f"• Budget gems (<£6m): {len(all_gems[all_gems['cost_millions'] < 6])}")
+                    else:
+                        st.write("**💰 Price Analysis:**")
+                        st.write("Price data not available")
+                
+                with col3:
+                    # Ownership analysis
+                    if not all_gems.empty:
+                        avg_ownership = all_gems['selected_by_percent'].mean()
+                        ultra_low = len(all_gems[all_gems['selected_by_percent'] < 5])
+                        very_low = len(all_gems[all_gems['selected_by_percent'] < 10])
+                        
+                        st.write("**👥 Ownership Analysis:**")
+                        st.write(f"• Average ownership: {avg_ownership:.1f}%")
+                        st.write(f"• Ultra-low (<5%): {ultra_low}")
+                        st.write(f"• Very low (<10%): {very_low}")
+                    else:
+                        st.write("**👥 Ownership Analysis:**")
+                        st.write("Ownership data not available")
+                
+                # Strategic advice
+                st.subheader("🎯 Hidden Gems Strategy")
+                
+                if not all_gems.empty:
+                    best_gem = top_gems.iloc[0] if not top_gems.empty else None
+                    
+                    if best_gem is not None:
+                        st.success(f"""
+                        **🎯 Top Recommendation: {best_gem['web_name']}**
+                        
+                        This {best_gem.get('position_name', 'player')} offers exceptional value with only {best_gem['selected_by_percent']:.1f}% ownership.
+                        With {best_gem['total_points']} points and a gem score of {best_gem['gem_score']:.3f}, they represent 
+                        an ideal differential choice for rank climbing.
+                        """)
+                    
+                    # General strategy advice
+                    st.info("""
+                    **💡 Hidden Gems Strategy Tips:**
+                    
+                    🎯 **For Rank Climbing**: Focus on ultra-low ownership gems (<5%) with good recent form
+                    
+                    📊 **For Steady Growth**: Choose emerging gems (10-25% ownership) with excellent value
+                    
+                    🔥 **For Short-term Gains**: Target form gems with great recent performances
+                    
+                    ⚖️ **Risk Management**: Balance proven performers with 1-2 differential gems
+                    """)
+                
                 else:
-                    st.info("No hidden gems found with current filters")
+                    st.warning("**No hidden gems found with current filters.**")
+                    
+                    # Provide suggestions for finding gems
+                    st.info("""
+                    **💡 Try these strategies to find hidden gems:**
+                    
+                    🔧 **Adjust Filters:**
+                    - Lower the minimum points threshold
+                    - Include more positions or teams
+                    - Expand the price range
+                    
+                    📊 **Alternative Searches:**
+                    - Look at recent form (last 5 games)
+                    - Check players with good upcoming fixtures
+                    - Consider players returning from injury
+                    
+                    ⏰ **Timing:**
+                    - Check after price changes
+                    - Look before double gameweeks
+                    - Monitor after team news
+                    """)
+                    
+                    # Show some potential gems with relaxed criteria
+                    st.write("**🔍 Potential Gems (Relaxed Criteria):**")
+                    
+                    relaxed_gems = gems_df[
+                        (gems_df['selected_by_percent'] < 20) &
+                        (gems_df['total_points'] > 15)
+                    ].nlargest(5, 'total_points')
+                    
+                    if not relaxed_gems.empty:
+                        for _, player in relaxed_gems.iterrows():
+                            st.write(f"• **{player['web_name']}** ({player.get('position_name', 'N/A')}) - "
+                                    f"{player['total_points']} pts, {player['selected_by_percent']:.1f}% owned")
+                    else:
+                        st.write("Even with relaxed criteria, no potential gems found in current filters.")
+            
             else:
-                st.info("Insufficient data for hidden gem analysis")
+                st.warning("**Insufficient data for hidden gem analysis**")
+                st.info("Hidden gems analysis requires ownership and points data. Please ensure the data is loaded correctly.")
         
         with ai_tab4:
             st.write("**⚠️ AI Risk Assessment**")

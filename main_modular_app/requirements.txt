@@ -23,6 +23,9 @@ xlsxwriter>=3.1.0
 redis>=4.6.0  # Optional for advanced caching
 joblib>=1.3.0
 
+# Automation and Scheduling
+schedule>=1.2.0
+
 # Web Scraping and API Enhancement
 beautifulsoup4>=4.12.0
 aiohttp>=3.8.0

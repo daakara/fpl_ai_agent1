@@ -116,15 +116,35 @@ class FixtureAnalysisPage:
         
         # Calculate fixture difficulty for each team
         team_fixtures = {}
+        api_status = {'success': 0, 'fallback': 0, 'error': 0}
+        
         for team in all_teams:
             if pd.notna(team):
                 fixtures = self.fixture_service.get_upcoming_fixtures_difficulty(team, 5)
                 team_fixtures[team] = fixtures
+                
+                # Track API status
+                if fixtures.get('is_fallback'):
+                    api_status['fallback'] += 1
+                else:
+                    api_status['success'] += 1
         
         if not team_fixtures:
             st.warning("No fixture data available. Using simplified analysis based on team strength.")
             self._render_simplified_fixture_analysis(df)
             return
+        
+        # Display data source status
+        total_teams = api_status['success'] + api_status['fallback']
+        if total_teams > 0:
+            success_rate = api_status['success'] / total_teams * 100
+            
+            if success_rate == 100:
+                st.success(f"✅ **Official FPL API Data** - All {total_teams} teams loaded from official API")
+            elif success_rate >= 50:
+                st.warning(f"⚠️ **Mixed Data Sources** - {api_status['success']} teams from API, {api_status['fallback']} teams using fallback data")
+            else:
+                st.error(f"❌ **Limited API Access** - Only {api_status['success']} teams from API, {api_status['fallback']} teams using fallback data")
         
         # Display overview metrics
         col1, col2, col3, col4 = st.columns(4)
@@ -360,7 +380,7 @@ class FixtureAnalysisPage:
         self._display_defense_recommendations(team_defense_fixtures, df)
     
     def _calculate_attack_difficulty(self, team_name: str, fixtures_data: Dict) -> Dict:
-        """Calculate attack-specific difficulty based on opponent defensive strength"""
+        """Calculate attack-specific difficulty based on opponent defensive strength using official FPL data"""
         attack_fixtures = []
         total_attack_difficulty = 0
         
@@ -368,26 +388,30 @@ class FixtureAnalysisPage:
             opponent = fixture['opponent']
             is_home = fixture['home']
             
-            # Get opponent's defensive strength
+            # Get opponent's defensive strength from official FPL API data
             opponent_strength = self.fixture_service.get_team_attack_defense_strength(opponent)
-            opponent_defense = opponent_strength.get('defense', 65)
             
-            # Calculate attack difficulty (how hard to score against this defense)
-            base_difficulty = opponent_defense / 100 * 5  # Scale to 1-5
-            
-            # Home advantage for attacking
+            # Use official FPL defensive strength ratings (1-5 scale)
             if is_home:
-                base_difficulty *= 0.9  # Easier to score at home
+                opponent_defense = opponent_strength.get('defense_away', 3)  # Opponent defending away
             else:
-                base_difficulty *= 1.1  # Harder to score away
+                opponent_defense = opponent_strength.get('defense_home', 3)  # Opponent defending at home
             
-            # Ensure within 1-5 range
-            attack_difficulty = max(1, min(5, base_difficulty))
+            # Calculate attack difficulty using FPL's scale
+            # Higher defense rating = harder to score against
+            attack_difficulty = opponent_defense
+            
+            # Apply home advantage adjustment
+            if is_home:
+                attack_difficulty = max(1, attack_difficulty - 0.3)  # Easier to score at home
+            else:
+                attack_difficulty = min(5, attack_difficulty + 0.3)  # Harder to score away
             
             attack_fixtures.append({
                 **fixture,
                 'attack_difficulty': round(attack_difficulty, 1),
-                'opponent_defense_strength': opponent_defense
+                'opponent_defense_strength': opponent_defense,
+                'opponent_team_strength': opponent_strength
             })
             
             total_attack_difficulty += attack_difficulty
@@ -402,7 +426,7 @@ class FixtureAnalysisPage:
         }
     
     def _calculate_defense_difficulty(self, team_name: str, fixtures_data: Dict) -> Dict:
-        """Calculate defense-specific difficulty based on opponent attacking strength"""
+        """Calculate defense-specific difficulty based on opponent attacking strength using official FPL data"""
         defense_fixtures = []
         total_defense_difficulty = 0
         
@@ -410,26 +434,30 @@ class FixtureAnalysisPage:
             opponent = fixture['opponent']
             is_home = fixture['home']
             
-            # Get opponent's attacking strength
+            # Get opponent's attacking strength from official FPL API data
             opponent_strength = self.fixture_service.get_team_attack_defense_strength(opponent)
-            opponent_attack = opponent_strength.get('attack', 65)
             
-            # Calculate defense difficulty (how hard to keep clean sheet against this attack)
-            base_difficulty = opponent_attack / 100 * 5  # Scale to 1-5
-            
-            # Home advantage for defending
+            # Use official FPL attacking strength ratings (1-5 scale)
             if is_home:
-                base_difficulty *= 0.85  # Easier to defend at home
+                opponent_attack = opponent_strength.get('attack_away', 3)  # Opponent attacking away
             else:
-                base_difficulty *= 1.15  # Harder to defend away
+                opponent_attack = opponent_strength.get('attack_home', 3)  # Opponent attacking at home
             
-            # Ensure within 1-5 range
-            defense_difficulty = max(1, min(5, base_difficulty))
+            # Calculate defense difficulty using FPL's scale
+            # Higher attack rating = harder to defend against
+            defense_difficulty = opponent_attack
+            
+            # Apply home advantage adjustment for defending
+            if is_home:
+                defense_difficulty = max(1, defense_difficulty - 0.4)  # Easier to defend at home
+            else:
+                defense_difficulty = min(5, defense_difficulty + 0.4)  # Harder to defend away
             
             defense_fixtures.append({
                 **fixture,
                 'defense_difficulty': round(defense_difficulty, 1),
-                'opponent_attack_strength': opponent_attack
+                'opponent_attack_strength': opponent_attack,
+                'opponent_team_strength': opponent_strength
             })
             
             total_defense_difficulty += defense_difficulty
@@ -595,40 +623,88 @@ class FixtureAnalysisPage:
                         st.write(f"• **{team_name}** ({fixtures_data['avg_defense_difficulty']:.1f}) - {top_defender['web_name']}")
     
     def _display_attack_defense_analysis(self, df):
-        """Display attacking and defensive fixture analysis"""
+        """Display attacking and defensive fixture analysis using official FPL data"""
         st.subheader("⚔️ Attacking vs Defensive Fixture Analysis")
         
         with st.expander("📚 Understanding Attack vs Defense Analysis", expanded=False):
             st.markdown("""
             **Attacking Fixtures**: How easy it is for players to score/assist
-            - Consider opponent's **defensive strength**
+            - Uses **official FPL defensive strength ratings**
             - Target players facing weak defenses
             
             **Defensive Fixtures**: How likely defenders/GKs are to get clean sheets
-            - Consider opponent's **attacking strength** 
+            - Uses **official FPL attacking strength ratings**
             - Target defenders facing weak attacks
+            
+            ✅ **Data Source**: Official Fantasy Premier League API team strength values
             """)
         
         # Get all teams
         all_teams = df['team_short_name'].unique() if 'team_short_name' in df.columns else []
         
+        # Track API data usage
+        api_teams_count = 0
+        fallback_teams_count = 0
+        
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("⚔️ Best Attacking Fixtures")
-            st.write("*Teams facing weak defenses*")
+            st.write("*Teams facing weak defenses (official FPL ratings)*")
             
             attacking_scores = []
             for team in all_teams:
                 if pd.notna(team):
                     fixtures = self.fixture_service.get_upcoming_fixtures_difficulty(team, 5)
-                    # For attacking, we want weak defenses (easier to score against)
-                    attacking_score = 6 - fixtures['average_difficulty']  # Invert for attacking
+                    
+                    # Track data source
+                    if fixtures.get('is_fallback'):
+                        fallback_teams_count += 1
+                    else:
+                        api_teams_count += 1
+                    
+                    # Calculate attacking score using real opponent defensive strength
+                    attacking_score = 0
+                    valid_fixtures = 0
+                    
+                    for fixture in fixtures['fixtures']:
+                        opponent = fixture['opponent']
+                        is_home = fixture['home']
+                        
+                        # Get opponent's defensive strength from FPL API
+                        opponent_strength = self.fixture_service.get_team_attack_defense_strength(opponent)
+                        
+                        if is_home:
+                            opponent_defense = opponent_strength.get('defense_away', 3)
+                        else:
+                            opponent_defense = opponent_strength.get('defense_home', 3)
+                        
+                        # Lower defense = better for attacking (invert scale)
+                        fixture_attacking_score = 6 - opponent_defense
+                        attacking_score += fixture_attacking_score
+                        valid_fixtures += 1
+                    
+                    if valid_fixtures > 0:
+                        attacking_score = attacking_score / valid_fixtures
+                    else:
+                        attacking_score = 3  # Neutral
+                    
                     attacking_scores.append({
                         'team': team,
                         'attacking_score': attacking_score,
                         'fixtures': fixtures
                     })
+            
+            # Display data source status
+            total_teams = api_teams_count + fallback_teams_count
+            if total_teams > 0:
+                api_percentage = (api_teams_count / total_teams) * 100
+                if api_percentage == 100:
+                    st.success("✅ Using official FPL defensive strength data")
+                elif api_percentage >= 50:
+                    st.warning(f"⚠️ {api_teams_count}/{total_teams} teams using FPL API data")
+                else:
+                    st.error(f"❌ Limited API access: {api_teams_count}/{total_teams} teams")
             
             # Sort by attacking score (best first)
             attacking_scores.sort(key=lambda x: x['attacking_score'], reverse=True)
@@ -640,6 +716,19 @@ class FixtureAnalysisPage:
                 score_color = "🟢" if score >= 3.5 else "🟡" if score >= 2.5 else "🔴"
                 
                 with st.expander(f"{score_color} {team_name} - Attacking Score: {score:.1f}"):
+                    # Show next opponents with their defensive ratings
+                    for fixture in team_data['fixtures']['fixtures'][:3]:
+                        opponent = fixture['opponent']
+                        opponent_strength = self.fixture_service.get_team_attack_defense_strength(opponent)
+                        home_away = "🏠 vs" if fixture['home'] else "✈️ @"
+                        
+                        if fixture['home']:
+                            def_rating = opponent_strength.get('defense_away', 3)
+                        else:
+                            def_rating = opponent_strength.get('defense_home', 3)
+                        
+                        st.write(f"GW{fixture['gameweek']}: {home_away} {opponent} (Def: {def_rating}/5)")
+                    
                     # Show top attacking players from this team
                     team_players = df[df['team_short_name'] == team_name]
                     if not team_players.empty:
@@ -652,14 +741,39 @@ class FixtureAnalysisPage:
         
         with col2:
             st.subheader("🛡️ Best Defensive Fixtures")
-            st.write("*Teams facing weak attacks*")
+            st.write("*Teams facing weak attacks (official FPL ratings)*")
             
             defensive_scores = []
             for team in all_teams:
                 if pd.notna(team):
                     fixtures = self.fixture_service.get_upcoming_fixtures_difficulty(team, 5)
-                    # For defending, we want weak attacks (easier to keep clean sheets)
-                    defensive_score = 6 - fixtures['average_difficulty']  # Invert for defensive
+                    
+                    # Calculate defensive score using real opponent attacking strength
+                    defensive_score = 0
+                    valid_fixtures = 0
+                    
+                    for fixture in fixtures['fixtures']:
+                        opponent = fixture['opponent']
+                        is_home = fixture['home']
+                        
+                        # Get opponent's attacking strength from FPL API
+                        opponent_strength = self.fixture_service.get_team_attack_defense_strength(opponent)
+                        
+                        if is_home:
+                            opponent_attack = opponent_strength.get('attack_away', 3)
+                        else:
+                            opponent_attack = opponent_strength.get('attack_home', 3)
+                        
+                        # Lower attack = better for defending (invert scale)
+                        fixture_defensive_score = 6 - opponent_attack
+                        defensive_score += fixture_defensive_score
+                        valid_fixtures += 1
+                    
+                    if valid_fixtures > 0:
+                        defensive_score = defensive_score / valid_fixtures
+                    else:
+                        defensive_score = 3  # Neutral
+                    
                     defensive_scores.append({
                         'team': team,
                         'defensive_score': defensive_score,
@@ -676,6 +790,19 @@ class FixtureAnalysisPage:
                 score_color = "🟢" if score >= 3.5 else "🟡" if score >= 2.5 else "🔴"
                 
                 with st.expander(f"{score_color} {team_name} - Defensive Score: {score:.1f}"):
+                    # Show next opponents with their attacking ratings
+                    for fixture in team_data['fixtures']['fixtures'][:3]:
+                        opponent = fixture['opponent']
+                        opponent_strength = self.fixture_service.get_team_attack_defense_strength(opponent)
+                        home_away = "🏠 vs" if fixture['home'] else "✈️ @"
+                        
+                        if fixture['home']:
+                            att_rating = opponent_strength.get('attack_away', 3)
+                        else:
+                            att_rating = opponent_strength.get('attack_home', 3)
+                        
+                        st.write(f"GW{fixture['gameweek']}: {home_away} {opponent} (Att: {att_rating}/5)")
+                    
                     # Show top defensive players from this team
                     team_players = df[df['team_short_name'] == team_name]
                     if not team_players.empty:
@@ -686,23 +813,23 @@ class FixtureAnalysisPage:
                             for _, player in top_defenders.iterrows():
                                 st.write(f"• {player.get('web_name', 'Unknown')} ({player.get('position_name', 'Unknown')})")
         
-        # Combined recommendation
-        st.subheader("🎯 Combined Fixture Recommendations")
+        # Combined recommendation using official data
+        st.subheader("🎯 Combined Fixture Recommendations (FPL API Data)")
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
             st.success("""
             **🟢 Excellent Fixtures**
-            - Strong attacking options
-            - Good clean sheet potential
+            - Weak opponent defense/attack (FPL ratings 1-2)
+            - Strong clean sheet potential
             - Consider captaincy
             """)
         
         with col2:
             st.info("""
             **🟡 Mixed Fixtures**
-            - Some good, some difficult
+            - Average opponent strength (FPL ratings 3)
             - Monitor team news
             - Backup options ready
             """)
@@ -710,17 +837,32 @@ class FixtureAnalysisPage:
         with col3:
             st.error("""
             **🔴 Difficult Fixtures**
-            - Consider bench/transfer
+            - Strong opponent defense/attack (FPL ratings 4-5)
             - Avoid captaincy
             - Look for alternatives
             """)
-    
+
     def _display_captain_fixture_analysis(self, df):
-        """Analyze fixtures for captaincy decisions"""
+        """Analyze fixtures for captaincy decisions using official FPL API data"""
         st.subheader("👑 Captain Fixture Analysis")
+        
+        with st.expander("📚 Understanding Captain Analysis with FPL Data", expanded=False):
+            st.markdown("""
+            **Captain Analysis** uses official FPL data to rank captaincy options:
+            
+            🎯 **Factors Considered:**
+            - **Official FPL fixture difficulty** (1-5 scale)
+            - **Player form** and total points
+            - **Ownership percentage** for risk/reward analysis
+            - **Home vs Away** advantage from actual fixtures
+            
+            ✅ **Data Source**: Official Fantasy Premier League API
+            """)
         
         # Get potential captains (high-scoring non-GKs)
         captain_candidates = []
+        api_fixture_count = 0
+        fallback_fixture_count = 0
         
         # Filter for good captain options
         if 'position_name' in df.columns and 'total_points' in df.columns:
@@ -730,8 +872,35 @@ class FixtureAnalysisPage:
             for _, player in top_scorers.iterrows():
                 team_name = player.get('team_short_name', 'UNK')
                 
-                # Get fixture difficulty for this player's team
+                # Get fixture difficulty for this player's team using official FPL API
                 fixtures = self.fixture_service.get_upcoming_fixtures_difficulty(team_name, 1)  # Next fixture only
+                
+                # Track data source
+                if fixtures.get('is_fallback'):
+                    fallback_fixture_count += 1
+                else:
+                    api_fixture_count += 1
+                
+                # Get next fixture details
+                next_fixture = fixtures['fixtures'][0] if fixtures['fixtures'] else None
+                
+                if next_fixture:
+                    # Get opponent strength data from FPL API
+                    opponent_strength = self.fixture_service.get_team_attack_defense_strength(next_fixture['opponent'])
+                    
+                    # Calculate fixture attractiveness for attacking players
+                    if next_fixture['home']:
+                        opponent_defense = opponent_strength.get('defense_away', 3)
+                        venue_bonus = 0.5  # Home advantage
+                    else:
+                        opponent_defense = opponent_strength.get('defense_home', 3)
+                        venue_bonus = -0.2  # Away disadvantage
+                    
+                    # Convert to attractiveness score (lower defense = higher attractiveness)
+                    fixture_attractiveness = (6 - opponent_defense) + venue_bonus
+                else:
+                    fixture_attractiveness = 3
+                    opponent_defense = 3
                 
                 captain_candidates.append({
                     'name': player.get('web_name', 'Unknown'),
@@ -741,23 +910,39 @@ class FixtureAnalysisPage:
                     'total_points': int(player.get('total_points', 0)),
                     'ownership': float(player.get('selected_by_percent', 0)),
                     'fixture_difficulty': fixtures['average_difficulty'],
-                    'next_opponent': fixtures['fixtures'][0]['opponent'] if fixtures['fixtures'] else 'TBD',
-                    'is_home': fixtures['fixtures'][0]['home'] if fixtures['fixtures'] else True
+                    'fixture_attractiveness': fixture_attractiveness,
+                    'next_opponent': next_fixture['opponent'] if next_fixture else 'TBD',
+                    'opponent_defense': opponent_defense,
+                    'is_home': next_fixture['home'] if next_fixture else True,
+                    'kickoff_time': next_fixture.get('kickoff_time') if next_fixture else None
                 })
         
+        # Display data source status
+        total_fixtures = api_fixture_count + fallback_fixture_count
+        if total_fixtures > 0:
+            api_percentage = (api_fixture_count / total_fixtures) * 100
+            
+            if api_percentage == 100:
+                st.success("✅ **Captain analysis using official FPL fixture data**")
+            elif api_percentage >= 50:
+                st.warning(f"⚠️ **Mixed data sources**: {api_fixture_count}/{total_fixtures} using FPL API")
+            else:
+                st.error(f"❌ **Limited API access**: {api_fixture_count}/{total_fixtures} using FPL API")
+        
         if captain_candidates:
-            # Calculate captain score (form + fixture ease + points)
+            # Calculate captain score using official data
             for candidate in captain_candidates:
-                fixture_score = 6 - candidate['fixture_difficulty']  # Invert difficulty
+                fixture_score = candidate['fixture_attractiveness']
                 form_score = candidate['form']
                 points_score = candidate['total_points'] / 100  # Normalize
                 
+                # Weight: fixture 40%, form 40%, historical points 20%
                 candidate['captain_score'] = (fixture_score * 0.4 + form_score * 0.4 + points_score * 0.2)
             
             # Sort by captain score
             captain_candidates.sort(key=lambda x: x['captain_score'], reverse=True)
             
-            st.write("**📊 Captain Options Ranked by Fixture + Form:**")
+            st.write("**📊 Captain Rankings (Using Official FPL Data):**")
             
             for i, candidate in enumerate(captain_candidates[:10], 1):
                 home_away = "🏠 vs" if candidate['is_home'] else "✈️ @"
@@ -773,16 +958,18 @@ class FixtureAnalysisPage:
                 else:
                     rec_level = "⚠️ Risky"
                 
-                with st.expander(f"{i}. {candidate['name']} - {rec_level} ({candidate['captain_score']:.1f})"):
+                with st.expander(f"{i}. {candidate['name']} - {rec_level} (Score: {candidate['captain_score']:.1f})"):
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
                         st.metric("Next Fixture", f"{home_away} {candidate['next_opponent']} {difficulty_emoji}")
-                        st.write(f"Fixture Difficulty: {candidate['fixture_difficulty']:.1f}")
+                        st.write(f"**FPL Difficulty:** {candidate['fixture_difficulty']:.1f}/5")
+                        st.write(f"**Opponent Defense:** {candidate['opponent_defense']}/5")
                     
                     with col2:
                         st.metric("Form", f"{candidate['form']:.1f}")
                         st.metric("Total Points", candidate['total_points'])
+                        st.write(f"**Fixture Score:** {candidate['fixture_attractiveness']:.1f}")
                     
                     with col3:
                         st.metric("Ownership", f"{candidate['ownership']:.1f}%")
@@ -794,67 +981,110 @@ class FixtureAnalysisPage:
                             st.write("💎 **Differential** - Low ownership")
                         else:
                             st.write("⚖️ **Balanced** - Medium ownership")
+                        
+                        # Show kickoff time if available
+                        if candidate.get('kickoff_time'):
+                            st.write(f"**Kickoff:** {candidate['kickoff_time']}")
         
         else:
             st.warning("No captain candidates found")
         
-        # Captain strategy tips
-        st.subheader("💡 Captain Strategy Tips")
+        # Captain strategy tips with FPL context
+        st.subheader("💡 Captain Strategy Tips (FPL Data)")
         
         col1, col2 = st.columns(2)
         
         with col1:
             st.info("""
             **🎯 This Gameweek:**
-            - Prioritize easy fixtures (1-2 difficulty)
-            - Consider home advantage
-            - Check for rotation risk
-            - Monitor team news
+            - Prioritize FPL difficulty 1-2 fixtures
+            - Consider opponent defensive weakness
+            - Check for rotation risk in team news
+            - Monitor home advantage
             """)
         
         with col2:
             st.warning("""
             **🔮 Long-term Planning:**
-            - Look ahead 2-3 gameweeks
-            - Plan around difficult fixtures
-            - Consider differential captains
-            - Track form trends
+            - Look ahead 2-3 gameweeks in FPL fixtures
+            - Plan around DGW/BGW schedules
+            - Consider differential captains vs template
+            - Track form trends vs fixture difficulty
             """)
-    
+
     def _display_fixture_transfer_targets(self, df):
-        """Identify transfer targets based on fixtures"""
+        """Identify transfer targets based on official FPL fixture data"""
         st.subheader("🔄 Fixture-Based Transfer Targets")
         
-        # Get all teams with their fixture difficulties
+        with st.expander("📚 Understanding Transfer Target Analysis", expanded=False):
+            st.markdown("""
+            **Transfer Target Analysis** uses official FPL data to identify optimal transfers:
+            
+            🎯 **Analysis Factors:**
+            - **Official FPL fixture difficulty ratings** for next 5 gameweeks
+            - **Player ownership** for differential opportunities
+            - **Form and points** for performance validation
+            - **Price and value** for budget optimization
+            
+            ✅ **Data Source**: Official Fantasy Premier League API
+            """)
+        
+        # Get all teams with their fixture difficulties using official FPL data
         all_teams = df['team_short_name'].unique() if 'team_short_name' in df.columns else []
         
         team_fixture_scores = []
+        api_teams = 0
+        fallback_teams = 0
         
         for team in all_teams:
             if pd.notna(team):
+                # Get official FPL fixture data
                 fixtures = self.fixture_service.get_upcoming_fixtures_difficulty(team, 5)
-                fixture_score = 6 - fixtures['average_difficulty']  # Higher = better fixtures
+                
+                # Track data source
+                if fixtures.get('is_fallback'):
+                    fallback_teams += 1
+                else:
+                    api_teams += 1
+                
+                # Calculate fixture score (higher = better fixtures)
+                fixture_score = 6 - fixtures['average_difficulty']
                 
                 team_fixture_scores.append({
                     'team': team,
                     'fixture_score': fixture_score,
                     'avg_difficulty': fixtures['average_difficulty'],
-                    'rating': fixtures['rating']
+                    'rating': fixtures['rating'],
+                    'fixtures_data': fixtures,
+                    'is_api_data': not fixtures.get('is_fallback', False)
                 })
+        
+        # Display data source status
+        total_teams = api_teams + fallback_teams
+        if total_teams > 0:
+            api_percentage = (api_teams / total_teams) * 100
+            
+            if api_percentage == 100:
+                st.success(f"✅ **Official FPL fixture data** - All {total_teams} teams using API")
+            elif api_percentage >= 50:
+                st.warning(f"⚠️ **Mixed data sources** - {api_teams}/{total_teams} teams using FPL API")
+            else:
+                st.error(f"❌ **Limited API access** - {api_teams}/{total_teams} teams using FPL API")
         
         # Sort by fixture quality (best first)
         team_fixture_scores.sort(key=lambda x: x['fixture_score'], reverse=True)
         
-        transfer_tabs = st.tabs(["🎯 Best Fixtures", "⚠️ Worst Fixtures", "💎 Differentials"])
+        transfer_tabs = st.tabs(["🎯 Best Fixtures", "⚠️ Worst Fixtures", "💎 Differentials", "📊 FPL Insights"])
         
         with transfer_tabs[0]:
-            st.subheader("🟢 Teams with Best Fixtures")
-            st.write("*Consider players from these teams*")
+            st.subheader("🟢 Teams with Best Fixtures (Official FPL)")
+            st.write("*Consider players from these teams - based on official fixture difficulty*")
             
             best_teams = team_fixture_scores[:8]
             
             for team_data in best_teams:
                 team_name = team_data['team']
+                data_source_indicator = "🟢 API" if team_data['is_api_data'] else "🟡 Est."
                 
                 # Get best players from this team
                 team_players = df[df['team_short_name'] == team_name]
@@ -862,7 +1092,15 @@ class FixtureAnalysisPage:
                     # Get top players by points
                     top_players = team_players.nlargest(5, 'total_points')
                     
-                    with st.expander(f"🟢 {team_name} - {team_data['rating']} Fixtures ({team_data['avg_difficulty']:.1f})"):
+                    with st.expander(f"{data_source_indicator} {team_name} - {team_data['rating']} Fixtures (FPL: {team_data['avg_difficulty']:.1f})"):
+                        
+                        # Show next 3 fixtures with official data
+                        st.write("**📅 Next 3 Official Fixtures:**")
+                        for fixture in team_data['fixtures_data']['fixtures'][:3]:
+                            home_away = "🏠 vs" if fixture['home'] else "✈️ @"
+                            difficulty_emoji = "🟢" if fixture['difficulty'] <= 2 else "🟡" if fixture['difficulty'] == 3 else "🔴"
+                            st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {difficulty_emoji} (FPL: {fixture['difficulty']})")
+                        
                         st.write("**🎯 Top Transfer Targets:**")
                         
                         for _, player in top_players.iterrows():
@@ -873,7 +1111,8 @@ class FixtureAnalysisPage:
                                 st.write(f"{player.get('position_name', 'Unknown')}")
                             
                             with col2:
-                                st.write(f"£{float(player.get('now_cost', 0))/10:.1f}m")
+                                price = float(player.get('now_cost', 0))/10
+                                st.write(f"£{price:.1f}m")
                                 st.write(f"Form: {player.get('form', 0)}")
                             
                             with col3:
@@ -893,13 +1132,14 @@ class FixtureAnalysisPage:
                                     st.write("⚖️ Balanced")
         
         with transfer_tabs[1]:
-            st.subheader("🔴 Teams with Worst Fixtures")
+            st.subheader("🔴 Teams with Worst Fixtures (Official FPL)")
             st.write("*Consider transferring out players from these teams*")
             
             worst_teams = team_fixture_scores[-8:]
             
             for team_data in worst_teams:
                 team_name = team_data['team']
+                data_source_indicator = "🟢 API" if team_data['is_api_data'] else "🟡 Est."
                 
                 # Get popular players from this team (likely in many squads)
                 team_players = df[df['team_short_name'] == team_name]
@@ -907,7 +1147,15 @@ class FixtureAnalysisPage:
                     # Get most owned players
                     popular_players = team_players.nlargest(3, 'selected_by_percent')
                     
-                    with st.expander(f"🔴 {team_name} - {team_data['rating']} Fixtures ({team_data['avg_difficulty']:.1f})"):
+                    with st.expander(f"{data_source_indicator} {team_name} - {team_data['rating']} Fixtures (FPL: {team_data['avg_difficulty']:.1f})"):
+                        
+                        # Show next 3 difficult fixtures
+                        st.write("**📅 Upcoming Difficult Fixtures:**")
+                        for fixture in team_data['fixtures_data']['fixtures'][:3]:
+                            home_away = "🏠 vs" if fixture['home'] else "✈️ @"
+                            difficulty_emoji = "🟢" if fixture['difficulty'] <= 2 else "🟡" if fixture['difficulty'] == 3 else "🔴"
+                            st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {difficulty_emoji} (FPL: {fixture['difficulty']})")
+                        
                         st.write("**⚠️ Consider Transferring Out:**")
                         
                         for _, player in popular_players.iterrows():
@@ -931,10 +1179,10 @@ class FixtureAnalysisPage:
                                     st.info("Good time to transfer out")
         
         with transfer_tabs[2]:
-            st.subheader("💎 Differential Opportunities")
-            st.write("*Low ownership players with good fixtures*")
+            st.subheader("💎 Differential Opportunities (FPL Data)")
+            st.write("*Low ownership players with excellent fixtures*")
             
-            # Find differential players (low ownership) with good fixtures
+            # Find differential players (low ownership) with good fixtures using official data
             differential_candidates = []
             
             for team_data in team_fixture_scores[:12]:  # Top 12 teams by fixtures
@@ -958,7 +1206,9 @@ class FixtureAnalysisPage:
                                 'points': player.get('total_points', 0),
                                 'form': float(player.get('form', 0)),
                                 'ownership': float(player.get('selected_by_percent', 0)),
-                                'fixture_score': team_data['fixture_score']
+                                'fixture_score': team_data['fixture_score'],
+                                'fpl_difficulty': team_data['avg_difficulty'],
+                                'is_api_data': team_data['is_api_data']
                             })
             
             # Sort by combined differential score
@@ -973,10 +1223,12 @@ class FixtureAnalysisPage:
             differential_candidates.sort(key=lambda x: x['differential_score'], reverse=True)
             
             for candidate in differential_candidates[:10]:
+                data_indicator = "🟢" if candidate['is_api_data'] else "🟡"
+                
                 col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    st.write(f"**{candidate['name']}**")
+                    st.write(f"**{candidate['name']}** {data_indicator}")
                     st.write(f"{candidate['position']} ({candidate['team']})")
                 
                 with col2:
@@ -985,30 +1237,95 @@ class FixtureAnalysisPage:
                 
                 with col3:
                     st.write(f"{candidate['points']} points")
-                    st.write(f"Fixtures: {candidate['fixture_score']:.1f}")
+                    st.write(f"FPL Diff: {candidate['fpl_difficulty']:.1f}")
                 
                 with col4:
                     st.write(f"{candidate['ownership']:.1f}% owned")
                     st.success("💎 Differential")
-    
+        
+        with transfer_tabs[3]:
+            st.subheader("📊 FPL Fixture Insights")
+            st.write("*Data-driven insights from official FPL fixtures*")
+            
+            # Create insights based on official data
+            if api_teams > 0:
+                # Calculate insights from API teams only
+                api_team_data = [t for t in team_fixture_scores if t['is_api_data']]
+                
+                if api_team_data:
+                    difficulties = [t['avg_difficulty'] for t in api_team_data]
+                    avg_league_difficulty = sum(difficulties) / len(difficulties)
+                    
+                    easy_fixture_teams = [t for t in api_team_data if t['avg_difficulty'] <= 2.5]
+                    hard_fixture_teams = [t for t in api_team_data if t['avg_difficulty'] >= 3.5]
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.info(f"""
+                        **📈 League Fixture Analysis:**
+                        - **Average Difficulty:** {avg_league_difficulty:.1f}/5
+                        - **Easy Fixture Teams:** {len(easy_fixture_teams)}
+                        - **Hard Fixture Teams:** {len(hard_fixture_teams)}
+                        - **Data Coverage:** {api_teams}/{total_teams} teams
+                        """)
+                    
+                    with col2:
+                        st.success(f"""
+                        **🎯 Transfer Strategy:**
+                        - Target teams with <2.5 difficulty
+                        - Avoid teams with >3.5 difficulty  
+                        - Monitor fixture swings
+                        - Plan 2-3 gameweeks ahead
+                        """)
+
     def _display_team_fixture_comparison(self, df):
-        """Compare fixture difficulty between teams"""
+        """Compare fixture difficulty between teams using official FPL API data"""
         st.subheader("📊 Team Fixture Comparison")
+        
+        with st.expander("📚 Understanding Team Comparison", expanded=False):
+            st.markdown("""
+            **Team Fixture Comparison** allows you to directly compare upcoming fixtures between any two teams:
+            
+            🎯 **Comparison Features:**
+            - **Official FPL fixture difficulty** for both teams
+            - **Side-by-side fixture analysis** for next 5 gameweeks
+            - **Player recommendations** from both teams
+            - **Transfer decision support** based on fixture comparison
+            
+            ✅ **Data Source**: Official Fantasy Premier League API
+            """)
         
         # Team selection for comparison
         all_teams = sorted(df['team_short_name'].unique()) if 'team_short_name' in df.columns else []
         
+        if len(all_teams) < 2:
+            st.warning("Need at least 2 teams to perform comparison.")
+            return
+        
         col1, col2 = st.columns(2)
         
         with col1:
-            team1 = st.selectbox("Select First Team", all_teams, index=0 if all_teams else None)
+            team1 = st.selectbox("Select First Team", all_teams, index=0 if all_teams else None, key="team1_select")
         
         with col2:
-            team2 = st.selectbox("Select Second Team", all_teams, index=1 if len(all_teams) > 1 else 0)
+            team2 = st.selectbox("Select Second Team", all_teams, index=1 if len(all_teams) > 1 else 0, key="team2_select")
         
         if team1 and team2 and team1 != team2:
-            # Compare fixtures between teams
+            # Compare fixtures between teams using official FPL data
             comparison = self.fixture_service.compare_fixture_run(team1, team2, 5)
+            
+            # Track data source quality
+            team1_is_api = not comparison['team1']['data'].get('is_fallback', False)
+            team2_is_api = not comparison['team2']['data'].get('is_fallback', False)
+            
+            # Display data source status
+            if team1_is_api and team2_is_api:
+                st.success("✅ **Both teams using official FPL fixture data**")
+            elif team1_is_api or team2_is_api:
+                st.warning("⚠️ **Mixed data sources** - some teams using FPL API, others using estimates")
+            else:
+                st.error("❌ **Limited API access** - using estimated fixture data")
             
             # Display comparison
             col1, col2 = st.columns(2)
@@ -1016,68 +1333,188 @@ class FixtureAnalysisPage:
             with col1:
                 st.subheader(f"⚽ {team1}")
                 team1_data = comparison['team1']['data']
+                data_indicator1 = "🟢 API" if team1_is_api else "🟡 Est."
                 
-                st.metric("Average Difficulty", f"{team1_data['average_difficulty']:.1f}")
+                st.metric("Average Difficulty", f"{team1_data['average_difficulty']:.1f}/5")
                 st.metric("Fixture Rating", team1_data['rating'])
+                st.write(f"**Data Source:** {data_indicator1}")
                 
                 st.write("**Next 5 Fixtures:**")
                 for fixture in team1_data['fixtures']:
                     home_away = "🏠 vs" if fixture['home'] else "✈️ @"
                     difficulty_emoji = "🟢" if fixture['difficulty'] <= 2 else "🟡" if fixture['difficulty'] == 3 else "🔴"
-                    st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {difficulty_emoji}")
+                    st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {difficulty_emoji} (FPL: {fixture['difficulty']})")
             
             with col2:
                 st.subheader(f"⚽ {team2}")
                 team2_data = comparison['team2']['data']
+                data_indicator2 = "🟢 API" if team2_is_api else "🟡 Est."
                 
-                st.metric("Average Difficulty", f"{team2_data['average_difficulty']:.1f}")
+                st.metric("Average Difficulty", f"{team2_data['average_difficulty']:.1f}/5")
                 st.metric("Fixture Rating", team2_data['rating'])
+                st.write(f"**Data Source:** {data_indicator2}")
                 
                 st.write("**Next 5 Fixtures:**")
                 for fixture in team2_data['fixtures']:
                     home_away = "🏠 vs" if fixture['home'] else "✈️ @"
                     difficulty_emoji = "🟢" if fixture['difficulty'] <= 2 else "🟡" if fixture['difficulty'] == 3 else "🔴"
-                    st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {difficulty_emoji}")
+                    st.write(f"GW{fixture['gameweek']}: {home_away} {fixture['opponent']} {difficulty_emoji} (FPL: {fixture['difficulty']})")
             
-            # Recommendation
-            st.subheader("🎯 Recommendation")
+            # Recommendation based on official FPL data
+            st.subheader("🎯 Fixture Comparison Result")
             recommended_team = comparison['recommendation']
             
-            if recommended_team == team1:
-                st.success(f"✅ **{team1}** has easier fixtures than {team2}")
-            else:
-                st.success(f"✅ **{team2}** has easier fixtures than {team1}")
+            difficulty_diff = abs(team1_data['average_difficulty'] - team2_data['average_difficulty'])
             
-            # Show players from both teams
-            st.subheader("👥 Players Comparison")
+            if difficulty_diff < 0.3:
+                st.info(f"⚖️ **Similar fixtures** - Both {team1} and {team2} have comparable difficulty ({team1_data['average_difficulty']:.1f} vs {team2_data['average_difficulty']:.1f})")
+            elif recommended_team == team1:
+                st.success(f"✅ **{team1}** has significantly easier fixtures than {team2} (Difference: {difficulty_diff:.1f})")
+            else:
+                st.success(f"✅ **{team2}** has significantly easier fixtures than {team1} (Difference: {difficulty_diff:.1f})")
+            
+            # Show players from both teams with transfer recommendations
+            st.subheader("👥 Player Comparison & Transfer Recommendations")
             
             col1, col2 = st.columns(2)
             
             with col1:
                 st.write(f"**{team1} Players:**")
                 team1_players = df[df['team_short_name'] == team1].nlargest(5, 'total_points')
-                for _, player in team1_players.iterrows():
-                    st.write(f"• {player.get('web_name', 'Unknown')} ({player.get('position_name', 'Unknown')}) - £{float(player.get('now_cost', 0))/10:.1f}m")
+                
+                if not team1_players.empty:
+                    for _, player in team1_players.iterrows():
+                        price = float(player.get('now_cost', 0))/10
+                        ownership = float(player.get('selected_by_percent', 0))
+                        
+                        # Add recommendation based on fixture comparison
+                        if recommended_team == team1:
+                            rec_emoji = "🎯"
+                            rec_text = "Target"
+                        elif difficulty_diff < 0.3:
+                            rec_emoji = "⚖️"
+                            rec_text = "Monitor"
+                        else:
+                            rec_emoji = "⚠️"
+                            rec_text = "Consider out"
+                        
+                        st.write(f"{rec_emoji} **{player.get('web_name', 'Unknown')}** ({player.get('position_name', 'Unknown')}) - £{price:.1f}m | {ownership:.1f}% owned | *{rec_text}*")
+                else:
+                    st.write("No players found for this team")
             
             with col2:
                 st.write(f"**{team2} Players:**")
                 team2_players = df[df['team_short_name'] == team2].nlargest(5, 'total_points')
-                for _, player in team2_players.iterrows():
-                    st.write(f"• {player.get('web_name', 'Unknown')} ({player.get('position_name', 'Unknown')}) - £{float(player.get('now_cost', 0))/10:.1f}m")
+                
+                if not team2_players.empty:
+                    for _, player in team2_players.iterrows():
+                        price = float(player.get('now_cost', 0))/10
+                        ownership = float(player.get('selected_by_percent', 0))
+                        
+                        # Add recommendation based on fixture comparison
+                        if recommended_team == team2:
+                            rec_emoji = "🎯"
+                            rec_text = "Target"
+                        elif difficulty_diff < 0.3:
+                            rec_emoji = "⚖️"
+                            rec_text = "Monitor"
+                        else:
+                            rec_emoji = "⚠️"
+                            rec_text = "Consider out"
+                        
+                        st.write(f"{rec_emoji} **{player.get('web_name', 'Unknown')}** ({player.get('position_name', 'Unknown')}) - £{price:.1f}m | {ownership:.1f}% owned | *{rec_text}*")
+                else:
+                    st.write("No players found for this team")
+            
+            # Advanced comparison insights
+            st.subheader("📈 Advanced Comparison Insights")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Count easy vs hard fixtures for each team
+                team1_easy = len([f for f in team1_data['fixtures'] if f['difficulty'] <= 2])
+                team1_hard = len([f for f in team1_data['fixtures'] if f['difficulty'] >= 4])
+                
+                st.info(f"""
+                **{team1} Breakdown:**
+                - Easy fixtures (1-2): {team1_easy}
+                - Hard fixtures (4-5): {team1_hard}
+                - Rating: {team1_data['rating']}
+                """)
+            
+            with col2:
+                team2_easy = len([f for f in team2_data['fixtures'] if f['difficulty'] <= 2])
+                team2_hard = len([f for f in team2_data['fixtures'] if f['difficulty'] >= 4])
+                
+                st.info(f"""
+                **{team2} Breakdown:**
+                - Easy fixtures (1-2): {team2_easy}
+                - Hard fixtures (4-5): {team2_hard}
+                - Rating: {team2_data['rating']}
+                """)
+            
+            with col3:
+                # Transfer strategy recommendation
+                if recommended_team == team1:
+                    strategy = f"Consider transferring {team2} players to {team1} players"
+                elif recommended_team == team2:
+                    strategy = f"Consider transferring {team1} players to {team2} players"
+                else:
+                    strategy = "Fixtures are similar - consider other factors"
+                
+                st.success(f"""
+                **Transfer Strategy:**
+                {strategy}
+                
+                **Best Time:** Plan transfers before difficult fixture runs begin
+                """)
         
         else:
             st.info("Please select two different teams to compare their fixtures.")
-    
+            
+            # Show some example comparisons when no teams selected
+            if len(all_teams) >= 4:
+                st.subheader("💡 Suggested Comparisons")
+                st.write("Try comparing these teams based on their typical fixture difficulty patterns:")
+                
+                sample_teams = all_teams[:4]
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**Popular Comparisons:**")
+                    st.write(f"• {sample_teams[0]} vs {sample_teams[1]}")
+                    st.write(f"• {sample_teams[2]} vs {sample_teams[3]}")
+                
+                with col2:
+                    st.write("**Analysis Tips:**")
+                    st.write("• Compare teams before making transfers")
+                    st.write("• Look for fixture swings (easy to hard)")
+                    st.write("• Consider both short and long-term fixtures")
+
     def _display_advanced_fixture_analysis(self, df):
-        """Display advanced fixture analysis including the original simplified version"""
+        """Display advanced fixture analysis including enhanced analytics"""
         st.subheader("📈 Advanced Fixture Analysis")
+        
+        with st.expander("📚 Understanding Advanced Analysis", expanded=False):
+            st.markdown("""
+            **Advanced Fixture Analysis** provides deeper insights using multiple data sources:
+            
+            🎯 **Advanced Features:**
+            - **Team strength trending** over time
+            - **Home vs Away performance** analysis  
+            - **Form-based fixture adjustments**
+            - **Statistical transfer recommendations**
+            
+            📊 **Data Integration**: Combines official FPL data with calculated analytics
+            """)
         
         # Sub-tabs for different types of advanced analysis
         advanced_tabs = st.tabs([
             "📊 Team Strength Analysis", 
             "🏠 Home vs Away", 
             "📈 Form-Based Fixtures",
-            "🎯 Transfer Recommendations"
+            "🎯 Statistical Recommendations"
         ])
         
         with advanced_tabs[0]:
@@ -1090,314 +1527,165 @@ class FixtureAnalysisPage:
             self._render_form_based_analysis(df)
         
         with advanced_tabs[3]:
-            self._render_fixture_transfer_recommendations(df)
-    
-    def _render_simplified_fixture_analysis(self, df):
-        """Render simplified fixture analysis using available data"""
-        
-        # Analysis tabs
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "📊 Team Strength Analysis", 
-            "🏠 Home vs Away", 
-            "📈 Form-Based Fixtures",
-            "🎯 Transfer Recommendations"
-        ])
-        
-        with tab1:
-            self._render_team_strength_analysis(df)
-        
-        with tab2:
-            self._render_home_away_analysis(df)
-        
-        with tab3:
-            self._render_form_based_analysis(df)
-        
-        with tab4:
-            self._render_fixture_transfer_recommendations(df)
-    
-    def _render_team_strength_analysis(self, df):
-        """Analyze team strength for fixture difficulty estimation"""
-        st.subheader("📊 Team Strength Analysis")
-        st.info("💡 Stronger teams = harder fixtures when playing against them")
+            self._render_statistical_recommendations(df)
+
+    def _render_statistical_recommendations(self, df):
+        """Provide statistical transfer recommendations based on fixture analysis"""
+        st.subheader("🎯 Statistical Transfer Recommendations")
+        st.info("💡 Data-driven recommendations combining fixture difficulty with player performance")
         
         if df.empty:
-            st.warning("No data available for team strength analysis")
+            st.warning("No data available for statistical analysis")
             return
         
-        # Calculate team strength metrics
-        team_metrics = df.groupby('team_short_name').agg({
-            'total_points': 'sum',
-            'goals_scored': 'sum' if 'goals_scored' in df.columns else 'count',
-            'clean_sheets': 'sum' if 'clean_sheets' in df.columns else 'count',
-            'form': 'mean' if 'form' in df.columns else 'count'
-        }).reset_index()
+        # Get all teams with their fixture data
+        all_teams = df['team_short_name'].unique() if 'team_short_name' in df.columns else []
         
-        # Calculate team strength score
-        if 'total_points' in team_metrics.columns:
-            team_metrics['strength_score'] = (
-                team_metrics['total_points'] / team_metrics['total_points'].max() * 100
-            ).round(1)
-            
-            team_metrics = team_metrics.sort_values('strength_score', ascending=False)
-            
-            # Display team strength
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("🔥 Strongest Teams (Hardest to face)")
-                strong_teams = team_metrics.head(10)
-                for _, team in strong_teams.iterrows():
-                    st.write(f"🔴 **{team['team_short_name']}**: {team['strength_score']:.1f} strength")
-            
-            with col2:
-                st.subheader("📉 Weaker Teams (Easier to face)")
-                weak_teams = team_metrics.tail(10)
-                for _, team in weak_teams.iterrows():
-                    st.write(f"🟢 **{team['team_short_name']}**: {team['strength_score']:.1f} strength")
-            
-            # Team strength visualization
-            fig = px.bar(
-                team_metrics, 
-                x='team_short_name', 
-                y='strength_score',
-                title="Team Strength Rankings",
-                color='strength_score',
-                color_continuous_scale='RdYlGn_r'
-            )
-            
-            fig.update_layout(
-                xaxis_title="Team",
-                yaxis_title="Strength Score",
-                height=500,
-                xaxis={'categoryorder': 'total descending'}
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+        # Calculate comprehensive team scores
+        team_analysis = []
         
-        else:
-            st.info("Insufficient data for team strength calculation")
-    
-    def _render_home_away_analysis(self, df):
-        """Analyze home vs away performance"""
-        st.subheader("🏠 Home vs Away Performance")
-        st.info("📍 Teams typically perform better at home - use this for fixture planning")
+        for team in all_teams:
+            if pd.notna(team):
+                # Get fixture data
+                fixtures = self.fixture_service.get_upcoming_fixtures_difficulty(team, 5)
+                
+                # Get team players
+                team_players = df[df['team_short_name'] == team]
+                
+                if not team_players.empty:
+                    # Calculate team metrics
+                    avg_points = team_players['total_points'].mean()
+                    avg_form = team_players['form'].mean() if 'form' in team_players.columns else 0
+                    avg_ownership = team_players['selected_by_percent'].mean() if 'selected_by_percent' in team_players.columns else 0
+                    avg_price = team_players['now_cost'].mean() / 10 if 'now_cost' in team_players.columns else 0
+                    
+                    # Fixture score (lower difficulty = higher score)
+                    fixture_score = 6 - fixtures['average_difficulty']
+                    
+                    # Combined recommendation score
+                    rec_score = (
+                        fixture_score * 0.4 +  # Fixture difficulty weight
+                        (avg_form / 10) * 0.3 +  # Form weight
+                        (avg_points / 100) * 0.2 +  # Historical performance weight
+                        (1 / avg_price if avg_price > 0 else 0) * 0.1  # Value weight
+                    )
+                    
+                    team_analysis.append({
+                        'team': team,
+                        'fixture_score': fixture_score,
+                        'avg_difficulty': fixtures['average_difficulty'],
+                        'avg_points': avg_points,
+                        'avg_form': avg_form,
+                        'avg_ownership': avg_ownership,
+                        'avg_price': avg_price,
+                        'rec_score': rec_score,
+                        'rating': fixtures['rating'],
+                        'is_api_data': not fixtures.get('is_fallback', False)
+                    })
         
-        # Since we don't have fixture data, we'll use team strength as proxy
-        if 'team_short_name' in df.columns and 'total_points' in df.columns:
-            team_stats = df.groupby('team_short_name').agg({
-                'total_points': 'sum',
-                'form': 'mean' if 'form' in df.columns else 'count'
-            }).reset_index()
-            
-            # Simulate home advantage (typically 0.3-0.5 points boost)
-            team_stats['home_strength'] = team_stats['total_points'] * 1.15
-            team_stats['away_strength'] = team_stats['total_points'] * 0.9
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("🏠 Best Home Teams")
-                st.write("*Teams likely to perform well at home*")
-                home_teams = team_stats.nlargest(8, 'home_strength')
-                for _, team in home_teams.iterrows():
-                    st.write(f"🟢 **{team['team_short_name']}**: Strong at home")
-            
-            with col2:
-                st.subheader("✈️ Best Away Teams") 
-                st.write("*Teams that travel well*")
-                away_teams = team_stats.nlargest(8, 'away_strength')
-                for _, team in away_teams.iterrows():
-                    st.write(f"🟡 **{team['team_short_name']}**: Good away form")
-            
-            # Home vs Away comparison chart
-            fig = go.Figure()
-            
-            fig.add_trace(go.Bar(
-                name='Home Strength',
-                x=team_stats['team_short_name'],
-                y=team_stats['home_strength'],
-                marker_color='lightgreen'
-            ))
-            
-            fig.add_trace(go.Bar(
-                name='Away Strength',
-                x=team_stats['team_short_name'], 
-                y=team_stats['away_strength'],
-                marker_color='lightcoral'
-            ))
-            
-            fig.update_layout(
-                title='Home vs Away Performance Comparison',
-                xaxis_title='Team',
-                yaxis_title='Estimated Strength',
-                barmode='group',
-                height=500
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+        if not team_analysis:
+            st.warning("No team analysis data available")
+            return
         
-        else:
-            st.info("Home/Away analysis requires team and points data")
-    
-    def _render_form_based_analysis(self, df):
-        """Analyze current form for fixture difficulty"""
-        st.subheader("📈 Form-Based Fixture Analysis")
-        st.info("🔥 Teams in good form are harder to face - adjust your transfers accordingly")
+        # Sort by recommendation score
+        team_analysis.sort(key=lambda x: x['rec_score'], reverse=True)
         
-        if 'form' not in df.columns:
-            st.warning("Form data not available - using total points as proxy")
-            if 'total_points' in df.columns:
-                # Use total points as form proxy
-                df = df.copy()
-                df['form'] = df['total_points'] / 20  # Approximate form from total points
-            else:
-                st.error("No suitable data for form analysis")
-                return
-        
-        # Team form analysis
-        team_form = df.groupby('team_short_name').agg({
-            'form': 'mean',
-            'total_points': 'sum' if 'total_points' in df.columns else 'count'
-        }).reset_index()
-        
-        team_form = team_form.sort_values('form', ascending=False)
-        
+        # Display recommendations in categories
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("🔥 Teams in Hot Form")
-            st.write("*Avoid facing these teams*")
-            hot_teams = team_form.head(8)
-            for _, team in hot_teams.iterrows():
-                st.write(f"🔴 **{team['team_short_name']}**: {team['form']:.1f} form")
+            st.success("🎯 **Top Transfer Targets**")
+            st.write("*Teams with best fixture + performance combination*")
+            
+            top_teams = team_analysis[:6]
+            for i, team_data in enumerate(top_teams, 1):
+                data_indicator = "🟢" if team_data['is_api_data'] else "🟡"
+                
+                with st.expander(f"{i}. {data_indicator} {team_data['team']} - Score: {team_data['rec_score']:.2f}"):
+                    col_a, col_b = st.columns(2)
+                    
+                    with col_a:
+                        st.write(f"**Fixture Rating:** {team_data['rating']}")
+                        st.write(f"**Avg Difficulty:** {team_data['avg_difficulty']:.1f}/5")
+                        st.write(f"**Avg Form:** {team_data['avg_form']:.1f}")
+                    
+                    with col_b:
+                        st.write(f"**Avg Points:** {team_data['avg_points']:.0f}")
+                        st.write(f"**Avg Price:** £{team_data['avg_price']:.1f}m")
+                        st.write(f"**Avg Ownership:** {team_data['avg_ownership']:.1f}%")
+                    
+                    # Show top 3 players from this team
+                    team_players = df[df['team_short_name'] == team_data['team']]
+                    if not team_players.empty:
+                        top_players = team_players.nlargest(3, 'total_points')
+                        st.write("**Recommended Players:**")
+                        for _, player in top_players.iterrows():
+                            price = float(player.get('now_cost', 0))/10
+                            st.write(f"• {player.get('web_name', 'Unknown')} - £{price:.1f}m")
         
         with col2:
-            st.subheader("❄️ Teams in Poor Form")
-            st.write("*Target players facing these teams*")
-            cold_teams = team_form.tail(8)
-            for _, team in cold_teams.iterrows():
-                st.write(f"🟢 **{team['team_short_name']}**: {team['form']:.1f} form")
-        
-        # Form distribution
-        fig = px.histogram(
-            team_form, 
-            x='form',
-            nbins=10,
-            title="Team Form Distribution",
-            labels={'form': 'Average Form', 'count': 'Number of Teams'}
-        )
-        
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Form vs Points correlation
-        if 'total_points' in team_form.columns:
-            fig_scatter = px.scatter(
-                team_form,
-                x='form',
-                y='total_points',
-                text='team_short_name',
-                title="Form vs Total Points Correlation",
-                labels={'form': 'Average Form', 'total_points': 'Total Team Points'}
-            )
+            st.error("⚠️ **Teams to Avoid**")
+            st.write("*Teams with poor fixture + performance combination*")
             
-            fig_scatter.update_traces(textposition="top center")
-            fig_scatter.update_layout(height=500)
-            st.plotly_chart(fig_scatter, use_container_width=True)
-    
-    def _render_fixture_transfer_recommendations(self, df):
-        """Provide transfer recommendations based on fixture analysis"""
-        st.subheader("🎯 Fixture-Based Transfer Recommendations")
-        st.info("💡 Strategic recommendations based on team strength and form analysis")
-        
-        if df.empty:
-            st.warning("No data available for recommendations")
-            return
-        
-        # Calculate recommendation scores
-        team_analysis = df.groupby('team_short_name').agg({
-            'total_points': 'sum',
-            'form': 'mean' if 'form' in df.columns else 'count',
-            'selected_by_percent': 'mean' if 'selected_by_percent' in df.columns else 'count'
-        }).reset_index()
-        
-        if 'total_points' in team_analysis.columns:
-            # Calculate fixture attractiveness (lower = better fixtures ahead)
-            team_analysis['fixture_attractiveness'] = (
-                100 - (team_analysis['total_points'] / team_analysis['total_points'].max() * 100)
-            )
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("🎯 Teams to Target")
-                st.write("*Players from these teams likely have easier fixtures*")
+            bottom_teams = team_analysis[-6:]
+            for i, team_data in enumerate(bottom_teams, 1):
+                data_indicator = "🟢" if team_data['is_api_data'] else "🟡"
                 
-                # Teams with poor opponents (high fixture attractiveness)
-                target_teams = team_analysis.nlargest(8, 'fixture_attractiveness')
-                
-                for _, team in target_teams.iterrows():
-                    # Get best players from this team
-                    team_players = df[df['team_short_name'] == team['team_short_name']]
-                    if not team_players.empty:
-                        best_player = team_players.nlargest(1, 'total_points').iloc[0]
-                        st.write(f"🟢 **{team['team_short_name']}**: Consider {best_player['web_name']}")
-            
-            with col2:
-                st.subheader("⚠️ Teams to Avoid")
-                st.write("*Players from these teams likely face difficult fixtures*")
-                
-                # Teams with strong opponents (low fixture attractiveness) 
-                avoid_teams = team_analysis.nsmallest(8, 'fixture_attractiveness')
-                
-                for _, team in avoid_teams.iterrows():
-                    # Get popular players from this team
-                    team_players = df[df['team_short_name'] == team['team_short_name']]
+                with st.expander(f"{i}. {data_indicator} {team_data['team']} - Score: {team_data['rec_score']:.2f}"):
+                    col_a, col_b = st.columns(2)
+                    
+                    with col_a:
+                        st.write(f"**Fixture Rating:** {team_data['rating']}")
+                        st.write(f"**Avg Difficulty:** {team_data['avg_difficulty']:.1f}/5")
+                        st.write(f"**Avg Form:** {team_data['avg_form']:.1f}")
+                    
+                    with col_b:
+                        st.write(f"**Avg Points:** {team_data['avg_points']:.0f}")
+                        st.write(f"**Avg Price:** £{team_data['avg_price']:.1f}m")
+                        st.write(f"**Avg Ownership:** {team_data['avg_ownership']:.1f}%")
+                    
+                    # Show popular players to consider transferring out
+                    team_players = df[df['team_short_name'] == team_data['team']]
                     if not team_players.empty:
                         if 'selected_by_percent' in team_players.columns:
-                            popular_player = team_players.nlargest(1, 'selected_by_percent').iloc[0]
+                            popular_players = team_players.nlargest(3, 'selected_by_percent')
                         else:
-                            popular_player = team_players.nlargest(1, 'total_points').iloc[0]
-                        st.write(f"🔴 **{team['team_short_name']}**: Consider selling {popular_player['web_name']}")
+                            popular_players = team_players.nlargest(3, 'total_points')
+                        
+                        st.write("**Consider Transferring Out:**")
+                        for _, player in popular_players.iterrows():
+                            price = float(player.get('now_cost', 0))/10
+                            ownership = float(player.get('selected_by_percent', 0))
+                            st.write(f"• {player.get('web_name', 'Unknown')} - £{price:.1f}m ({ownership:.1f}% owned)")
         
-        # Transfer timing recommendations
-        st.subheader("⏰ Transfer Timing Strategy")
+        # Overall transfer strategy
+        st.subheader("📋 Overall Transfer Strategy")
+        
+        # Calculate league averages
+        avg_rec_score = sum(t['rec_score'] for t in team_analysis) / len(team_analysis)
+        avg_fixture_diff = sum(t['avg_difficulty'] for t in team_analysis) / len(team_analysis)
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.info("""
-            **🚀 Immediate Targets**
-            - Players from weak teams
-            - Good form + easy fixtures
-            - Price rises expected
-            """)
+            st.metric("League Avg Rec Score", f"{avg_rec_score:.2f}")
+            st.metric("League Avg Difficulty", f"{avg_fixture_diff:.1f}/5")
         
         with col2:
-            st.warning("""
-            **⏳ Monitor Closely**
-            - Form vs fixture conflict
-            - Injury concerns
-            - Rotation risks
-            """)
+            excellent_teams = len([t for t in team_analysis if t['rec_score'] > avg_rec_score + 0.5])
+            poor_teams = len([t for t in team_analysis if t['rec_score'] < avg_rec_score - 0.5])
+            
+            st.metric("Excellent Opportunities", excellent_teams)
+            st.metric("Teams to Avoid", poor_teams)
         
         with col3:
-            st.error("""
-            **❌ Avoid This Week**
-            - Strong opposition ahead
-            - Poor recent form
-            - High risk of benching
-            """)
-        
-        # Simple fixture difficulty matrix
-        st.subheader("📊 Quick Fixture Difficulty Guide")
-        
-        difficulty_guide = pd.DataFrame({
-            'Opponent Strength': ['Very Strong', 'Strong', 'Average', 'Weak', 'Very Weak'],
-            'Home Fixture': ['🔴 Very Hard', '🟠 Hard', '🟡 Average', '🟢 Easy', '🟢 Very Easy'],
-            'Away Fixture': ['🔴 Extremely Hard', '🔴 Very Hard', '🟠 Hard', '🟡 Average', '🟢 Easy'],
-            'Recommendation': ['Avoid', 'Consider Out', 'Monitor', 'Consider In', 'Strong Target']
-        })
-        
-        st.dataframe(difficulty_guide, use_container_width=True, hide_index=True)
+            api_coverage = len([t for t in team_analysis if t['is_api_data']]) / len(team_analysis) * 100
+            st.metric("API Data Coverage", f"{api_coverage:.0f}%")
+            
+            if api_coverage == 100:
+                st.success("🟢 Full API Coverage")
+            elif api_coverage >= 70:
+                st.warning("🟡 Good API Coverage")
+            else:
+                st.error("🔴 Limited API Coverage")
 

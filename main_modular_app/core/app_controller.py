@@ -458,7 +458,54 @@ class EnhancedFPLAppController:
                 st.switch_page("dashboard")
             return
         
-        st.info("🚧 Team Builder feature is coming soon! This will allow you to build and optimize your FPL team.")
+        # Enhanced team builder with automated recommendations integration
+        st.info("🚧 Enhanced Team Builder with AI automation coming soon!")
+        
+        # For now, show a basic team building interface
+        st.markdown("#### 🤖 Quick Team Building with AI")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            formation = st.selectbox(
+                "Select Formation",
+                ["3-4-3", "3-5-2", "4-3-3", "4-4-2", "4-5-1", "5-3-2", "5-4-1"],
+                key="team_builder_formation"
+            )
+            
+            budget = st.number_input(
+                "Total Budget (£m)",
+                min_value=80.0,
+                max_value=100.0,
+                value=100.0,
+                step=0.5,
+                key="team_builder_budget"
+            )
+        
+        with col2:
+            risk_level = st.selectbox(
+                "Risk Level",
+                ["Conservative", "Balanced", "Aggressive"],
+                index=1,
+                key="team_builder_risk"
+            )
+            
+            focus = st.selectbox(
+                "Team Focus",
+                ["Points Maximum", "Value for Money", "Differential Heavy", "Template Safe"],
+                key="team_builder_focus"
+            )
+        
+        if st.button("🤖 Build AI-Optimized Team", type="primary"):
+            st.info("🔄 This will integrate with the automated recommendation system to build complete teams")
+            
+            # Placeholder for team building logic
+            st.markdown("**🎯 Planned Features:**")
+            st.write("• Complete team generation using AI recommendations")
+            st.write("• Formation-based player selection")
+            st.write("• Budget optimization algorithms") 
+            st.write("• Risk assessment and balancing")
+            st.write("• Integration with automated iteration engine")
     
     def render_settings_page(self):
         """Render settings and preferences page"""
@@ -527,21 +574,8 @@ class EnhancedFPLAppController:
                 st.switch_page("dashboard")
             return
         
-        # Import the UI components for automated iteration
-        from components.automated_iteration_ui import (
-            render_automated_recommendations_tab,
-            render_feedback_summary,
-            display_automated_iteration_help
-        )
+        # Import the new automated implementation UI
+        from components.automated_implementation_ui import render_automated_implementation_dashboard
         
-        # Create tabs for different sections
-        tab1, tab2, tab3 = st.tabs(["🤖 AI Recommendations", "📊 Feedback Analysis", "❓ Help"])
-        
-        with tab1:
-            render_automated_recommendations_tab(st.session_state.players_df)
-        
-        with tab2:
-            render_feedback_summary()
-        
-        with tab3:
-            display_automated_iteration_help()
+        # Render the comprehensive automated implementation dashboard
+        render_automated_implementation_dashboard()
