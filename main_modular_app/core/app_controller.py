@@ -3,6 +3,7 @@ Enhanced Application Controller with Modern Features
 """
 import streamlit as st
 import pandas as pd
+import time
 from pages.player_analysis_page import PlayerAnalysisPage
 from pages.fixture_analysis_page import FixtureAnalysisPage  
 from pages.my_team_page import MyTeamPage
@@ -13,7 +14,6 @@ from utils.modern_ui_components import ModernUIComponents, NavigationManager, Da
 from utils.enhanced_cache import display_cache_metrics, cached_load_fpl_data
 from utils.error_handling import handle_errors, logger, perf_monitor
 from config.app_config import config
-import time
 
 
 class EnhancedFPLAppController:
@@ -107,7 +107,7 @@ class EnhancedFPLAppController:
             'teams_df': pd.DataFrame(),
             'fdr_data_loaded': False,
             'fixtures_df': pd.DataFrame(),
-            'current_gameweek': 4,  # Set default current gameweek to 4
+            'current_gameweek': 4,
             'user_preferences': {},
             'performance_mode': 'standard',
             'theme': 'light',
@@ -123,45 +123,33 @@ class EnhancedFPLAppController:
         for key, value in defaults.items():
             if key not in st.session_state:
                 st.session_state[key] = value
-    
+
     @handle_errors("Application error occurred", show_details=True)
     def run(self):
         """Enhanced application runner with error handling and performance monitoring"""
         start_time = time.time()
-        selected_page = "dashboard"  # Initialize with default value
+        selected_page = "dashboard"
         
         try:
-            # Ensure session state is properly initialized
             self.initialize_session_state()
-            
-            # Render header
             self.render_enhanced_header()
             
-            # Handle quick actions
             quick_action = self.nav_manager.render_quick_actions()
             if quick_action:
                 self.handle_quick_action(quick_action)
             
-            # Render navigation and get selected page
             selected_page = self.page_router.render_sidebar()
-            
-            # Add to navigation history
             self.nav_manager.add_to_history(selected_page)
-            
-            # Render breadcrumbs
             self.nav_manager.render_breadcrumbs(selected_page)
             
-            # Check for recent page navigation
             recent_page = self.nav_manager.render_recent_pages()
             if recent_page:
                 selected_page = recent_page
                 st.rerun()
             
-            # Display performance metrics if debug mode
             if st.session_state.debug_mode:
                 self.display_debug_info()
             
-            # Route to appropriate page with performance monitoring
             perf_monitor.start_timer(f"page_render_{selected_page}")
             
             if selected_page == "dashboard":
@@ -184,14 +172,8 @@ class EnhancedFPLAppController:
                 st.error(f"Unknown page: {selected_page}")
             
             perf_monitor.end_timer(f"page_render_{selected_page}")
-            
-            # Update performance metrics
             self.performance_metrics['page_loads'] += 1
-            
-            # Display cache metrics in sidebar
             display_cache_metrics()
-            
-            # Render footer
             self.render_footer()
             
         except Exception as e:
@@ -200,7 +182,6 @@ class EnhancedFPLAppController:
             raise
         
         finally:
-            # Log performance - selected_page is now always defined
             execution_time = time.time() - start_time
             logger.log_performance("app_run", execution_time, {"page": selected_page})
     
@@ -213,39 +194,29 @@ class EnhancedFPLAppController:
         </div>
         """, unsafe_allow_html=True)
         
-        # Status indicators
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             data_status = "🟢 Loaded" if st.session_state.data_loaded else "🔴 Not Loaded"
-            self.ui_components.create_metric_card(
-                "Data Status", data_status, icon="📊"
-            )
+            self.ui_components.create_metric_card("Data Status", data_status, icon="📊")
         
         with col2:
             player_count = len(st.session_state.players_df) if not st.session_state.players_df.empty else 0
-            self.ui_components.create_metric_card(
-                "Players", str(player_count), icon="👥"
-            )
+            self.ui_components.create_metric_card("Players", str(player_count), icon="👥")
         
         with col3:
             session_duration = int(time.time() - self.performance_metrics['session_start'])
-            self.ui_components.create_metric_card(
-                "Session", f"{session_duration//60}m {session_duration%60}s", icon="⏱️"
-            )
+            self.ui_components.create_metric_card("Session", f"{session_duration//60}m {session_duration%60}s", icon="⏱️")
         
         with col4:
             page_loads = self.performance_metrics['page_loads']
-            self.ui_components.create_metric_card(
-                "Page Loads", str(page_loads), icon="📄"
-            )
+            self.ui_components.create_metric_card("Page Loads", str(page_loads), icon="📄")
     
     def render_enhanced_dashboard(self):
         """Render enhanced dashboard with modern components"""
         st.markdown("### 🎯 Dashboard Overview")
         
         if not st.session_state.data_loaded:
-            # Enhanced onboarding
             st.markdown("""
             <div class="feature-highlight">
                 <h3>👋 Welcome to FPL Analytics!</h3>
@@ -274,9 +245,7 @@ class EnhancedFPLAppController:
         
         df = st.session_state.players_df
         
-        # Enhanced key metrics with modern cards
         st.markdown("### 📊 Key Metrics")
-        
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -309,7 +278,6 @@ class EnhancedFPLAppController:
                     delta=f"{best_value['points_per_million']:.1f} pts/£m", icon="💎"
                 )
         
-        # Interactive visualizations
         st.markdown("### 📈 Performance Insights")
         
         if len(df) > 0:
@@ -329,49 +297,7 @@ class EnhancedFPLAppController:
                     composition = {position_names.get(k, f'Position {k}'): v for k, v in position_counts.items()}
                     DataVisualization.create_team_balance_chart(composition)
         
-        # Feature highlights
-        st.markdown("### ✨ Available Features")
-        
-        feature_col1, feature_col2 = st.columns(2)
-        
-        with feature_col1:
-            ai_enabled = self.ui_components.create_feature_card(
-                "AI Recommendations", 
-                "Get personalized player suggestions powered by machine learning",
-                "🤖", 
-                enabled=st.session_state.feature_flags.get('ai_recommendations', True)
-            )
-            st.session_state.feature_flags['ai_recommendations'] = ai_enabled
-            
-            analytics_enabled = self.ui_components.create_feature_card(
-                "Advanced Analytics",
-                "Deep performance insights and statistical analysis", 
-                "📊",
-                enabled=st.session_state.feature_flags.get('advanced_analytics', True)
-            )
-            st.session_state.feature_flags['advanced_analytics'] = analytics_enabled
-        
-        with feature_col2:
-            realtime_enabled = self.ui_components.create_feature_card(
-                "Real-time Updates",
-                "Live data updates and price change monitoring",
-                "⚡", 
-                enabled=st.session_state.feature_flags.get('real_time_updates', False),
-                beta=True
-            )
-            st.session_state.feature_flags['real_time_updates'] = realtime_enabled
-            
-            export_enabled = self.ui_components.create_feature_card(
-                "Data Export",
-                "Export analysis results and custom reports",
-                "💾",
-                enabled=st.session_state.feature_flags.get('export_features', True)
-            )
-            st.session_state.feature_flags['export_features'] = export_enabled
-        
-        # Quick actions
         st.markdown("### ⚡ Quick Actions")
-        
         action_col1, action_col2, action_col3, action_col4 = st.columns(4)
         
         with action_col1:
@@ -395,7 +321,6 @@ class EnhancedFPLAppController:
         if action == "refresh_data":
             with st.spinner("Refreshing data..."):
                 try:
-                    # Clear cache and reload
                     from utils.enhanced_cache import cache_manager
                     cache_manager.clear_cache()
                     
@@ -457,7 +382,6 @@ class EnhancedFPLAppController:
         
         df = st.session_state.players_df
         
-        # Add filter options
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -484,7 +408,6 @@ class EnhancedFPLAppController:
             )
         
         try:
-            # Get AI recommendations
             position = None if position_filter == "All" else position_filter
             recommendations = get_player_recommendations(
                 df, 
@@ -496,7 +419,6 @@ class EnhancedFPLAppController:
             if recommendations:
                 st.success(f"🎯 Generated {len(recommendations)} AI recommendations!")
                 
-                # Display recommendations
                 for i, rec in enumerate(recommendations, 1):
                     with st.expander(f"#{i} Recommendation: {rec.web_name} ({rec.team_name})"):
                         col1, col2 = st.columns(2)
@@ -511,46 +433,12 @@ class EnhancedFPLAppController:
                             st.metric("Form Score", f"{rec.form_score:.2f}")
                             st.metric("Risk Level", rec.risk_level)
                         
-                        # Show confidence and ownership
-                        conf_col1, conf_col2 = st.columns(2)
-                        with conf_col1:
-                            st.metric("Confidence", f"{rec.confidence_score:.1%}")
-                        with conf_col2:
-                            st.metric("Expected ROI", f"{rec.expected_roi:.1f}%")
-                        
-                        # Display reasoning
                         if rec.reasoning:
                             st.markdown("**🧠 AI Reasoning:**")
                             for reason in rec.reasoning:
                                 st.write(f"• {reason}")
                         else:
                             st.write("**Recommendation:** Strong statistical performance indicates good value.")
-                
-                # Summary statistics
-                st.markdown("### 📊 Recommendation Summary")
-                
-                avg_price = sum(rec.current_price for rec in recommendations) / len(recommendations)
-                avg_value_score = sum(rec.value_score for rec in recommendations) / len(recommendations)
-                risk_distribution = {}
-                for rec in recommendations:
-                    risk_distribution[rec.risk_level] = risk_distribution.get(rec.risk_level, 0) + 1
-                
-                summary_col1, summary_col2, summary_col3 = st.columns(3)
-                
-                with summary_col1:
-                    st.metric("Average Price", f"£{avg_price:.1f}m")
-                
-                with summary_col2:
-                    st.metric("Average Value Score", f"{avg_value_score:.1f}")
-                
-                with summary_col3:
-                    most_common_risk = max(risk_distribution.items(), key=lambda x: x[1])[0]
-                    st.metric("Most Common Risk", most_common_risk)
-                
-                # Risk distribution chart
-                if len(risk_distribution) > 1:
-                    st.markdown("#### Risk Level Distribution")
-                    st.bar_chart(risk_distribution)
             
             else:
                 st.info("No recommendations available with the current filters.")
@@ -571,29 +459,11 @@ class EnhancedFPLAppController:
             return
         
         st.info("🚧 Team Builder feature is coming soon! This will allow you to build and optimize your FPL team.")
-        
-        # Placeholder for team builder functionality
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### Available Features (Coming Soon)")
-            st.write("- 🎯 Optimal team selection")
-            st.write("- 💰 Budget optimization")
-            st.write("- 🔄 Transfer planning")
-            st.write("- 📊 Team analysis")
-        
-        with col2:
-            st.markdown("#### Current Status")
-            st.write("- ✅ Data loading")
-            st.write("- ✅ Player analysis")
-            st.write("- 🚧 Team optimization (in development)")
-            st.write("- 🚧 Budget management (in development)")
     
     def render_settings_page(self):
         """Render settings and preferences page"""
         st.markdown("### ⚙️ Settings & Preferences")
         
-        # Theme settings
         st.markdown("#### 🎨 Theme Settings")
         theme = st.selectbox(
             "Choose theme",
@@ -604,18 +474,6 @@ class EnhancedFPLAppController:
             st.session_state.theme = theme
             st.success(f"Theme updated to {theme}")
         
-        # Performance settings
-        st.markdown("#### ⚡ Performance Settings")
-        performance_mode = st.selectbox(
-            "Performance Mode",
-            ["standard", "fast", "detailed"],
-            index=["standard", "fast", "detailed"].index(st.session_state.performance_mode)
-        )
-        if performance_mode != st.session_state.performance_mode:
-            st.session_state.performance_mode = performance_mode
-            st.success(f"Performance mode updated to {performance_mode}")
-        
-        # Debug settings
         st.markdown("#### 🔧 Debug Settings")
         debug_mode = st.checkbox(
             "Enable debug mode",
@@ -624,47 +482,6 @@ class EnhancedFPLAppController:
         if debug_mode != st.session_state.debug_mode:
             st.session_state.debug_mode = debug_mode
             st.success(f"Debug mode {'enabled' if debug_mode else 'disabled'}")
-        
-        # Feature flags
-        st.markdown("#### 🚀 Feature Flags")
-        for feature, enabled in st.session_state.feature_flags.items():
-            new_value = st.checkbox(
-                f"Enable {feature.replace('_', ' ').title()}",
-                value=enabled,
-                key=f"feature_{feature}"
-            )
-            if new_value != enabled:
-                st.session_state.feature_flags[feature] = new_value
-                st.success(f"{feature.replace('_', ' ').title()} {'enabled' if new_value else 'disabled'}")
-        
-        # Data management
-        st.markdown("#### 📊 Data Management")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🔄 Refresh All Data"):
-                self.handle_quick_action("refresh_data")
-        
-        with col2:
-            if st.button("💾 Export Data"):
-                self.handle_quick_action("export_data")
-        
-        # Cache management
-        st.markdown("#### 🗄️ Cache Management")
-        cache_info = {
-            "Cache Status": "Enabled" if config.cache.enabled else "Disabled",
-            "TTL": f"{config.cache.ttl_seconds} seconds",
-            "Max Size": f"{config.cache.max_size_mb} MB"
-        }
-        st.json(cache_info)
-        
-        if st.button("🗑️ Clear Cache"):
-            try:
-                from utils.enhanced_cache import cache_manager
-                cache_manager.clear_cache()
-                st.success("Cache cleared successfully!")
-            except Exception as e:
-                st.error(f"Error clearing cache: {str(e)}")
     
     def export_current_data(self):
         """Export current data to various formats"""
@@ -693,25 +510,6 @@ class EnhancedFPLAppController:
                         data=csv_buffer.getvalue(),
                         file_name="fpl_players_data.csv",
                         mime="text/csv"
-                    )
-                
-                elif export_format == "Excel":
-                    excel_buffer = io.BytesIO()
-                    df.to_excel(excel_buffer, index=False, engine='openpyxl')
-                    st.download_button(
-                        label="📥 Download Excel",
-                        data=excel_buffer.getvalue(),
-                        file_name="fpl_players_data.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                
-                elif export_format == "JSON":
-                    json_data = df.to_json(orient='records', indent=2)
-                    st.download_button(
-                        label="📥 Download JSON",
-                        data=json_data,
-                        file_name="fpl_players_data.json",
-                        mime="application/json"
                     )
                 
                 st.success(f"Data exported successfully as {export_format}!")
@@ -747,5 +545,3 @@ class EnhancedFPLAppController:
         
         with tab3:
             display_automated_iteration_help()
-</copilot-edited-file>
-```

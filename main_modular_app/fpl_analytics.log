@@ -272,3 +272,30 @@
 2025-09-20 00:16:53,824 - fpl_analytics - INFO - Performance - app_run: 0.03s - {'page': 'team_builder'}
 2025-09-20 00:17:01,313 - fpl_analytics - INFO - Performance - page_render_players: 0.26s
 2025-09-20 00:17:01,319 - fpl_analytics - INFO - Performance - app_run: 0.28s - {'page': 'players'}
+2025-09-20 02:12:09,383 - fpl_analytics - INFO - Performance - page_render_players: 0.36s
+2025-09-20 02:12:09,394 - fpl_analytics - INFO - Performance - app_run: 0.40s - {'page': 'players'}
+2025-09-20 02:14:28,292 - fpl_analytics - INFO - Performance - page_render_players: 0.29s
+2025-09-20 02:14:28,295 - fpl_analytics - INFO - Performance - app_run: 0.31s - {'page': 'players'}
+2025-09-20 02:16:16,816 - fpl_analytics - INFO - Performance - page_render_dashboard: 0.00s
+2025-09-20 02:16:16,823 - fpl_analytics - INFO - Performance - app_run: 0.03s - {'page': 'dashboard'}
+2025-09-20 02:16:36,367 - fpl_analytics - INFO - Performance - page_render_dashboard: 0.00s
+2025-09-20 02:16:36,372 - fpl_analytics - INFO - Performance - app_run: 0.02s - {'page': 'dashboard'}
+2025-09-20 02:16:43,584 - fpl_analytics - INFO - Performance - page_render_dashboard: 0.35s
+2025-09-20 02:16:43,589 - fpl_analytics - INFO - Performance - app_run: 1.44s - {'page': 'dashboard'}
+2025-09-20 02:16:47,755 - fpl_analytics - INFO - Performance - page_render_my_team: 0.61s
+2025-09-20 02:16:47,755 - fpl_analytics - INFO - Performance - app_run: 0.62s - {'page': 'my_team'}
+2025-09-20 02:16:53,843 - fpl_analytics - INFO - Performance - page_render_my_team: 0.61s
+2025-09-20 02:16:53,853 - fpl_analytics - INFO - Performance - app_run: 0.63s - {'page': 'my_team'}
+2025-09-20 02:16:56,093 - fpl_analytics - INFO - Performance - app_run: 1.48s - {'page': 'my_team'}
+2025-09-20 02:16:56,576 - fpl_analytics - INFO - Performance - page_render_my_team: 0.37s
+2025-09-20 02:16:56,591 - fpl_analytics - INFO - Performance - app_run: 0.40s - {'page': 'my_team'}
+2025-09-20 02:17:05,343 - fpl_analytics - INFO - Performance - app_run: 1.72s - {'page': 'fixtures'}
+2025-09-20 02:17:07,414 - fpl_analytics - INFO - Performance - page_render_fixtures: 3.65s
+2025-09-20 02:17:07,414 - fpl_analytics - INFO - Performance - app_run: 3.66s - {'page': 'fixtures'}
+2025-09-20 02:17:17,618 - fpl_analytics - ERROR - Error in app_controller_run: {'error_type': 'ModuleNotFoundError', 'error_message': "No module named 'reportlab'", 'context': 'app_controller_run', 'traceback': 'Traceback (most recent call last):\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\core\\app_controller.py", line 166, in run\n    self.render_automated_iteration_page()\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\core\\app_controller.py", line 531, in render_automated_iteration_page\n    from components.automated_iteration_ui import (\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\components\\automated_iteration_ui.py", line 11, in <module>\n    from services.automated_iteration_service import (\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\services\\automated_iteration_service.py", line 21, in <module>\n    from services.data_export_import import UserPreferenceManager\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\services\\data_export_import.py", line 18, in <module>\n    from reportlab.lib.pagesizes import letter, A4\nModuleNotFoundError: No module named \'reportlab\'\n'}
+2025-09-20 02:17:17,618 - fpl_analytics - INFO - Performance - app_run: 0.07s - {'page': 'automated_iteration'}
+2025-09-20 02:17:17,618 - fpl_analytics - ERROR - Error in run: {'error_type': 'ModuleNotFoundError', 'error_message': "No module named 'reportlab'", 'context': 'run', 'traceback': 'Traceback (most recent call last):\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\utils\\error_handling.py", line 99, in wrapper\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\core\\app_controller.py", line 166, in run\n    self.render_automated_iteration_page()\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\core\\app_controller.py", line 531, in render_automated_iteration_page\n    from components.automated_iteration_ui import (\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\components\\automated_iteration_ui.py", line 11, in <module>\n    from services.automated_iteration_service import (\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\services\\automated_iteration_service.py", line 21, in <module>\n    from services.data_export_import import UserPreferenceManager\n  File "C:\\Users\\daakara\\OneDrive - DPDHL\\Documents\\fpl_ai_agent\\main_modular_app\\services\\data_export_import.py", line 18, in <module>\n    from reportlab.lib.pagesizes import letter, A4\nModuleNotFoundError: No module named \'reportlab\'\n'}
+2025-09-20 02:17:23,662 - fpl_analytics - INFO - Performance - page_render_team_builder: 0.00s
+2025-09-20 02:17:23,667 - fpl_analytics - INFO - Performance - app_run: 0.02s - {'page': 'team_builder'}
+2025-09-20 02:17:29,951 - fpl_analytics - INFO - Performance - page_render_ai_recommendations: 0.02s
+2025-09-20 02:17:29,965 - fpl_analytics - INFO - Performance - app_run: 0.05s - {'page': 'ai_recommendations'}
